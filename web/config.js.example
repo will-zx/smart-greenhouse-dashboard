@@ -1,0 +1,13 @@
+// Salin file ini ke config.js lalu isi nilainya dari Firebase console:
+// Project Settings -> General -> Your apps -> SDK setup and configuration.
+//
+// JANGAN commit config.js (ada di .gitignore). Commit hanya config.js.example.
+
+const DB_URL = "https://YOUR-PROJECT-default-rtdb.firebaseio.com/";
+const DEVICE_ID = "esp32-greenhouse";
+
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    projectId: "YOUR_PROJECT_ID",
+    authDomain: "YOUR_PROJECT.firebaseapp.com"
+};

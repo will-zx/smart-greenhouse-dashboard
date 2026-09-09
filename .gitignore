@@ -1,0 +1,26 @@
+# Secrets (never commit)
+firmware/src/secrets.h
+
+# Build & tooling artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+.clangd/
+compile_commands.json
+
+# Project-local opencode bits
+.opencode/node_modules/
+
+# Capstone documents (not versioned)
+Asset/
+Dokumen_Pendukung/
+Laporan/
+Naskah_Publikasi/
+Panduan/
+Referensi/
+*.pdf
+*.odt
+*.docx
+*.ris
+cap.html

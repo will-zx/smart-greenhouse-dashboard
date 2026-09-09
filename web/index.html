@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Greenhouse Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="config.js"></script>
+</head>
+<body>
+
+    <div class="login-overlay" id="login">
+        <div class="login-box">
+            <h2>Smart Greenhouse</h2>
+            <p>Masuk untuk mengakses dashboard.</p>
+            <form id="loginForm">
+                <label for="loginEmail">Email</label>
+                <input type="email" id="loginEmail" required autocomplete="username">
+                <label for="loginPass">Password</label>
+                <input type="password" id="loginPass" required autocomplete="current-password">
+                <button class="btn auto btn-login" type="submit">Masuk</button>
+            </form>
+            <p class="login-error" id="loginError"></p>
+        </div>
+    </div>
+
+    <div id="app" class="hidden">
+        <header class="header">
+            <h1>
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13C4 9 7 6 11 6h9v9c0 4-4 7-9 7z"/><path d="M20 6C14 8 10 12 8 16"/></svg>
+                Smart Greenhouse Panel
+            </h1>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div class="badge on" id="onlineBadge">
+                    <svg viewBox="0 0 10 10" width="9" height="9"><circle cx="5" cy="5" r="4" fill="currentColor"/></svg>
+                    <span id="onlineText">Live Monitoring</span>
+                </div>
+                <button class="btn off" onclick="signOut()">Keluar (<span id="userEmail"></span>)</button>
+            </div>
+        </header>
+
+        <div class="container">
+
+            <div class="metrics">
+                <div class="metric">
+                    <div class="label">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+                        Suhu
+                    </div>
+                    <div class="value"><span id="mv-temp">-</span><small> °C</small></div>
+                </div>
+                <div class="metric">
+                    <div class="label">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3 4 6 8 6 11a6 6 0 0 1-12 0c0-3 3-7 6-11z"/></svg>
+                        Kelembapan
+                    </div>
+                    <div class="value"><span id="mv-hum">-</span><small> %</small></div>
+                </div>
+                <div class="metric">
+                    <div class="label">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 12v4M12 17v4M3 12h4M8 12h10M17 12h4"/></svg>
+                        Tanah
+                    </div>
+                    <div class="value"><span id="mv-soil">-</span><small> %</small></div>
+                </div>
+                <div class="metric">
+                    <div class="label">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+                        VPD
+                    </div>
+                    <div class="value"><span id="mv-vpd">-</span><small> kPa</small></div>
+                </div>
+                <div class="metric">
+                    <div class="label">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        ET0
+                    </div>
+                    <div class="value"><span id="mv-et0">-</span><small> mm/hari</small></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h2>
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>
+                        Kontrol Aktuator
+                    </h2>
+                    <span class="note">Firebase RTDB (terautentikasi) → ESP32</span>
+                </div>
+                <div class="ctrl-grid">
+                    <div class="ctrl">
+                        <div>
+                            <h3>
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8c1 1 1-1 2 0M10 8c1 1 1-1 2 0M16 8c1 1 1-1 2 0M5 16c1 1 1-1 2 0M11 16c1 1 1-1 2 0M17 16c1 1 1-1 2 0"/></svg>
+                                Misting
+                            </h3>
+                            <p class="sub" id="state-mist">-</p>
+                        </div>
+                        <div class="acts">
+                            <button class="btn on" onclick="sendCommand('mist', true)">ON</button>
+                            <button class="btn off" onclick="sendCommand('mist', false)">OFF</button>
+                        </div>
+                    </div>
+                    <div class="ctrl">
+                        <div>
+                            <h3>
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3c3 4 6 8 6 11a6 6 0 0 1-12 0c0-3 3-7 6-11z"/></svg>
+                                Irigasi
+                            </h3>
+                            <p class="sub" id="state-irigasi">-</p>
+                        </div>
+                        <div class="acts">
+                            <button class="btn on" onclick="sendCommand('irigasi', true)">ON</button>
+                            <button class="btn off" onclick="sendCommand('irigasi', false)">OFF</button>
+                        </div>
+                    </div>
+                    <div class="ctrl">
+                        <div>
+                            <h3>
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.5"/><path d="M12 3v5M12 16v5M3 12h5M16 12h5"/></svg>
+                                Blower
+                            </h3>
+                            <p class="sub" id="state-blower">-</p>
+                        </div>
+                        <div class="acts">
+                            <button class="btn on" onclick="sendCommand('blower', true)">ON</button>
+                            <button class="btn off" onclick="sendCommand('blower', false)">OFF</button>
+                        </div>
+                    </div>
+                    <div class="ctrl">
+                        <div>
+                            <h3>
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+                                Mode
+                            </h3>
+                            <p class="sub" id="state-auto">-</p>
+                        </div>
+                        <button class="btn auto" onclick="sendCommand('auto', true)">AUTO</button>
+                    </div>
+                </div>
+                <p class="cmd-status" id="cmdStatus"></p>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h2>
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 3 5-6"/></svg>
+                        Grafik Tren Sensor
+                    </h2>
+                    <span class="note">Update berkala dari ESP32</span>
+                </div>
+                <div class="chart-wrap">
+                    <canvas id="sensorChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h2>
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+                        Histori Data Log Sensor
+                    </h2>
+                    <button class="refresh" onclick="fetchDataLogs()">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                        Refresh
+                    </button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Waktu (lokal)</th>
+                                <th>Suhu (°C)</th>
+                                <th>Kelembapan (%)</th>
+                                <th>Tanah (%)</th>
+                                <th>VPD (kPa)</th>
+                                <th>ET0 (mm/hari)</th>
+                                <th>Status Sistem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logTableBody">
+                            <tr><td colspan="7" class="empty">Memuat data log...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="app.js?v=3"></script>
+
+    <!--
+      SETUP WAJIB:
+      1. Isi config.js (salin dari config.js.example) dengan firebaseConfig & DB_URL milikmu.
+      2. Firebase console: Authentication -> Sign-in method -> aktifkan Email/Password.
+         -> Users -> tambah akun untuk login dashboard.
+      3. Realtime Database -> Rules. Contoh rules mengizinkan SDK login (request.auth != null)
+         DAN legacy secret ESP32 (request.query.auth == <secret>) — lihat TUTORIAL.md.
+    -->
+</body>
+</html>
