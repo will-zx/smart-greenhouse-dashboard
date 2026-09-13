@@ -132,7 +132,8 @@ void loop() {
             if (blower) statusSistem += " BLOWER";
             if (irigasi) statusSistem += " IRIGASI";
             pushSensorLog(sensorData.temperature, sensorData.humidity,
-                          sensorData.soilMoisture, vpdValue, irrigation.etc, statusSistem.c_str());
+                          sensorData.soilMoisture, vpdValue, irrigation.etc, statusSistem.c_str(),
+                          controlIsManual());
         }
         if (now - lastCmd >= DB_POLL_MS) {
             lastCmd = now;

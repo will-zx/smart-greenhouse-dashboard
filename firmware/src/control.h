@@ -8,5 +8,6 @@ void controlSetMist(bool on);
 void controlSetIrig(bool on);
 void controlSetBlower(bool on);
 void controlApply(bool* mist, bool* irigasi, bool* blower);
+bool controlIsManual();
 
 #endif

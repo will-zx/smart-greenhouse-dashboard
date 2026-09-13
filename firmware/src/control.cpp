@@ -33,3 +33,7 @@ void controlApply(bool* mist, bool* irigasi, bool* blower) {
     *irigasi = manIrig;
     *blower = manBlower;
 }
+
+bool controlIsManual() {
+    return active;
+}

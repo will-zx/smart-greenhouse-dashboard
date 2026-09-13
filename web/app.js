@@ -51,25 +51,25 @@ function signOut() {
     auth.signOut();
 }
 
-Chart.defaults.color = '#8fa3c3';
-Chart.defaults.borderColor = '#28334f';
+Chart.defaults.color = '#64748b';
+Chart.defaults.borderColor = '#dfe6ee';
 
 const sensorChart = new Chart(document.getElementById('sensorChart').getContext('2d'), {
     type: 'line',
     data: {
         labels: [],
         datasets: [
-            { label: 'Suhu (°C)', data: [], borderColor: '#f87171', backgroundColor: 'rgba(248, 113, 113, 0.12)', pointRadius: 2, tension: 0.3, yAxisID: 'y' },
-            { label: 'Kelembapan (%)', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56, 189, 248, 0.12)', pointRadius: 2, tension: 0.3, yAxisID: 'y1' }
+            { label: 'Suhu (°C)', data: [], borderColor: '#c62828', backgroundColor: 'rgba(198,40,40,0.10)', pointRadius: 2, tension: 0.3, yAxisID: 'y' },
+            { label: 'Kelembapan (%)', data: [], borderColor: '#0277bd', backgroundColor: 'rgba(2,119,189,0.10)', pointRadius: 2, tension: 0.3, yAxisID: 'y1' }
         ]
     },
     options: {
         responsive: true,
         maintainAspectRatio: false,
         scales: {
-            x: { grid: { color: '#1c2640' }, ticks: { color: '#8fa3c3' } },
-            y: { type: 'linear', position: 'left', grid: { color: '#1c2640' }, ticks: { color: '#8fa3c3' }, title: { display: true, text: 'Suhu (°C)', color: '#f87171' } },
-            y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#8fa3c3' }, title: { display: true, text: 'Kelembapan (%)', color: '#38bdf8' } }
+            x: { grid: { color: '#eef2f7' }, ticks: { color: '#64748b' } },
+            y: { type: 'linear', position: 'left', grid: { color: '#eef2f7' }, ticks: { color: '#64748b' }, title: { display: true, text: 'Suhu (°C)', color: '#c62828', font: { weight: 600 } } },
+            y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#64748b' }, title: { display: true, text: 'Kelembapan (%)', color: '#0277bd', font: { weight: 600 } } }
         }
     }
 });
@@ -102,7 +102,8 @@ function loadDemoData() {
             soil: b[2],
             vpd: b[3],
             et0: b[4],
-            status_sistem: b[5]
+            status_sistem: b[5],
+            manual_mode: false
         });
     });
 
@@ -180,10 +181,16 @@ async function fetchDataLogs() {
 function updateActuatorStates() {
     if (!lastData) return;
     const s = lastData.status_sistem || "";
+    document.getElementById('sw-mist').checked = s.includes("MISTING");
+    document.getElementById('sw-blower').checked = s.includes("BLOWER");
+    document.getElementById('sw-irigasi').checked = s.includes("IRIGASI");
     document.getElementById('state-mist').textContent = s.includes("MISTING") ? "AKTIF" : "mati";
     document.getElementById('state-blower').textContent = s.includes("BLOWER") ? "AKTIF" : "mati";
     document.getElementById('state-irigasi').textContent = s.includes("IRIGASI") ? "AKTIF" : "mati";
-    document.getElementById('state-auto').textContent = "otomatis";
+
+    const manual = lastData.manual_mode === true;
+    document.getElementById('state-auto').textContent = manual ? "off (manual)" : "on (otomatis)";
+    document.getElementById('sw-auto').checked = !manual;
 }
 
 function setOnline(ok) {
@@ -200,14 +207,23 @@ async function sendCommand(action, value) {
     const status = document.getElementById('cmdStatus');
     status.textContent = "Mengirim perintah...";
     if (DEMO_MODE) {
-        let msg = "Demo: " + action;
+        let msg;
         if (action === "auto") {
             msg = "Demo: mode otomatis (semua kembalikan ke fuzzy)";
+            lastData.manual_mode = false;
         } else {
             msg = "Demo: " + action + " " + (value ? "ON" : "OFF");
+            lastData.manual_mode = true;
+            const kw = action === "irigasi" ? "IRIGASI" : (action === "blower" ? "BLOWER" : "MISTING");
+            if (value) {
+                if (!lastData.status_sistem.includes(kw)) lastData.status_sistem += " " + kw;
+            } else {
+                lastData.status_sistem = lastData.status_sistem.split(" " + kw).join("");
+            }
         }
         status.textContent = msg;
         setTimeout(() => status.textContent = "", 4000);
+        updateActuatorStates();
         return;
     }
     try {
@@ -223,4 +239,19 @@ async function sendCommand(action, value) {
         status.textContent = "Gagal kirim: " + e.message;
     }
     setTimeout(() => status.textContent = "", 4000);
+}
+
+function onSwitch(action, on) {
+    if (action === "auto") {
+        if (!on) {
+            const status = document.getElementById('cmdStatus');
+            status.textContent = "Auto tidak bisa dimatikan langsung — geser aktuator manual untuk keluar dari auto";
+            setTimeout(() => status.textContent = "", 4000);
+            updateActuatorStates();
+            return;
+        }
+        sendCommand('auto', true);
+        return;
+    }
+    sendCommand(action, on);
 }

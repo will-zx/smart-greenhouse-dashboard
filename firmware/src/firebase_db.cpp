@@ -23,7 +23,7 @@ static void httpBegin(const String& path) {
 }
 
 void pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc,
-                   const char* statusSistem) {
+                   const char* statusSistem, bool manualMode) {
     if (WiFi.status() != WL_CONNECTED) return;
 
     // ts = epoch (NTP). Skip saat NTP belum sinkron supaya tidak tercatat epoch 1970.
@@ -37,6 +37,7 @@ void pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["vpd"] = vpd;
     doc["et0"] = etc;
     doc["status_sistem"] = statusSistem;
+    doc["manual_mode"] = manualMode;
     doc["ts"] = ts;
     String body;
     serializeJson(doc, body);
