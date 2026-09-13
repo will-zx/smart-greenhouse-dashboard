@@ -2,12 +2,14 @@
 // false = mode produksi (Firebase Auth + RTDB live).
 const DEMO_MODE = false;
 
+let auth = null;
+
 document.addEventListener('DOMContentLoaded', () => {
     if (DEMO_MODE) {
         document.getElementById('app').classList.remove('hidden');
         document.getElementById('login').classList.add('hidden');
         document.getElementById('onlineBadge').classList.remove('on', 'off');
-        document.getElementById('onlineBadge').classList.add('on');
+        document.getElementById('onlineBadge').classList.add('demo');
         document.getElementById('onlineText').textContent = 'Demo Mode';
         loadDemoData();
         return;
@@ -17,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // config.js menyediakan firebaseConfig, DB_URL, DEVICE_ID (jangan di-commit).
     // Persistence default = local: sesi tersimpan di browser, auto-login tiap buka.
     firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
+    auth = firebase.auth();
 
     auth.onAuthStateChanged(user => {
         const app = document.getElementById('app');
@@ -26,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
             app.classList.remove('hidden');
             login.classList.add('hidden');
             document.getElementById('userEmail').textContent = user.email;
+            document.getElementById('userAvatar').textContent = (user.email || '?').charAt(0).toUpperCase();
             startDashboard();
         } else {
             app.classList.add('hidden');
@@ -49,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function signOut() {
     if (DEMO_MODE) return;
-    auth.signOut();
+    auth.signOut().catch(e => console.error("Gagal logout:", e));
 }
 
 Chart.defaults.color = '#64748b';
@@ -113,8 +116,8 @@ function loadDemoData() {
     updateActuatorStates();
     const badge = document.getElementById('onlineText');
     badge.textContent = 'Demo Mode';
-    document.getElementById('onlineBadge').classList.remove('off');
-    document.getElementById('onlineBadge').classList.add('on');
+    document.getElementById('onlineBadge').classList.remove('off', 'on');
+    document.getElementById('onlineBadge').classList.add('demo');
 }
 
 function renderLogs(data) {
@@ -197,11 +200,11 @@ function updateActuatorStates() {
 function setOnline(ok) {
     const badge = document.getElementById('onlineBadge');
     const text = document.getElementById('onlineText');
-    badge.classList.remove('on', 'off');
+    badge.classList.remove('on', 'off', 'demo');
     badge.classList.add(ok ? 'on' : 'off');
     text.textContent = ok
-        ? (lastData ? 'Online - ' + new Date().toLocaleTimeString('id-ID') : 'Online')
-        : 'Offline - cek ESP32/DB';
+        ? 'ESP Online · ' + new Date().toLocaleTimeString('id-ID')
+        : 'ESP Offline';
 }
 
 async function sendCommand(action, value) {
