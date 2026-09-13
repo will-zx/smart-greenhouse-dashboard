@@ -16,7 +16,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Firebase Auth: tanda tangan Email/Password sebelum data dimuat.
     // config.js menyediakan firebaseConfig, DB_URL, DEVICE_ID (jangan di-commit).
     firebase.initializeApp(firebaseConfig);
+    // Sesi per-tab (SESSION): tutup tab = login ulang. Hapus dulu sesi lama
+    // yang tersimpan permanen (local) agar tidak auto-login dari browser sebelumnya.
+    localStorage.removeItem('firebase:authUser:' + firebaseConfig.apiKey + ':[DEFAULT]');
     const auth = firebase.auth();
+    auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
 
     auth.onAuthStateChanged(user => {
         const app = document.getElementById('app');
