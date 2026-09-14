@@ -9,8 +9,10 @@ firmware/src/secrets.h
 .clangd/
 compile_commands.json
 
-# Project-local opencode bits
-.opencode/node_modules/
+# OpenCode: config & state lokal (dibaca langsung dari disk, tidak perlu di-git)
+.opencode/
+opencode.json
+AGENTS.md
 
 # Capstone documents (not versioned)
 Asset/
