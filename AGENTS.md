@@ -8,9 +8,10 @@ Structure:
 - `Asset/, Dokumen_Pendukung/, Laporan/, Naskah_Publikasi/, Panduan/, Referensi/` — capstone documents (not part of the git repo).
 
 ## Tim / jobdesk (konteks capstone)
-- **Eksa** — mikroklimat/VPD: blower & misting, aturan fuzzy.
+- **Eksa** — mikroklimat/VPD: blower & misting.
 - **Alvin** — irigasi, perhitungan Blaney-Criddle (ETc).
-- **Wildan** — dashboard monitoring & kendali (bagian `web/`).
+- **Wildan** — dashboard monitoring & kendali: web (`web/`) + Telegram bot (kanal kontrol kedua, `firmware/src/telegram_bot.cpp`).
+- **Fuzzy bukan milik jobdesk siapapun** — mesin keputusan bersama: input dari Eksa (mikroklimat/VPD) & Alvin (irigasi/ETc) diproses `fuzzy.cpp`, output-nya dipakai seluruh sistem.
 
 ## Build & run (firmware)
 - PlatformIO project in `firmware/` (board `esp32dev`, monitor 115200). `firmware/platformio.ini` is committed. Required libs: `DHTesp`, `ArduinoJson`, `Adafruit GFX`, `Adafruit SSD1306`, plus core WiFi/HTTPClient.
