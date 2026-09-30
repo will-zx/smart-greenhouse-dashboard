@@ -19,6 +19,12 @@ dir.txt
 # Lock file OnlyOffice
 .~lock*#
 
+# Plugin OpenCode lokal (state per mesin)
+.opencode/plugins/
+
+# Backup rules RTDB lokal (jaring pengaman sebelum publish)
+web/rules_rtdb.bak
+
 # Capstone documents (not versioned)
 Asset/
 Dokumen_Pendukung/
