@@ -61,6 +61,43 @@ body {
     font-weight: 600;
     white-space: nowrap;
 }
+
+/* Multi-zone: pemilih greenhouse + badge peran di header */
+.zone-picker {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 999px;
+    padding: 3px 4px 3px 12px;
+}
+.zone-picker select {
+    background: transparent; border: none; outline: none;
+    color: #fff; font-size: 12px; font-weight: 600;
+    font-family: inherit; cursor: pointer; padding: 3px 2px;
+    max-width: 170px;
+}
+.zone-picker select option { color: #1f2937; background: #fff; }
+.zone-device {
+    font-size: 11px; color: rgba(255,255,255,0.6);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.btn.mini {
+    padding: 3px 8px; font-size: 12px; line-height: 1;
+    background: rgba(255,255,255,0.16); color: #fff;
+    border: 1px solid rgba(255,255,255,0.22);
+}
+.btn.mini:hover { background: rgba(255,255,255,0.28); }
+.role-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+    text-transform: uppercase;
+    padding: 4px 10px; border-radius: 999px;
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.22);
+    color: rgba(255,255,255,0.85);
+}
+.role-badge.admin { background: rgba(2,119,189,.85); border-color: rgba(144,202,249,.4); color: #fff; }
+.head-actions { display: flex; align-items: center; gap: 12px; }
+
 .badge.on { background: rgba(46,125,50,.9); border-color: rgba(134,239,172,.35); color: #fff; }
 .badge.on svg { color: #bbf7d0; animation: pulse-dot 1.4s ease-in-out infinite; }
 .badge.off { background: rgba(220,38,38,.85); border-color: rgba(252,165,165,.35); color: #fff; }
@@ -325,7 +362,9 @@ tbody tr:hover { background: #f0f5fc; }
 }
 @media (max-width: 768px) {
     .header { flex-direction: column; gap: 10px; padding: 12px 16px; }
-    .header-actions { width: 100%; justify-content: space-between; }
+    .header-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
+    .zone-picker select { max-width: 120px; }
+    .zone-device { display: none; }
     .metrics { grid-template-columns: repeat(2, 1fr); }
     .metric .value { font-size: 26px; }
     .ctrl-grid { grid-template-columns: 1fr; }

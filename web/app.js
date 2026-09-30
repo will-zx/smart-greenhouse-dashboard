@@ -3,6 +3,10 @@
 const DEMO_MODE = false;
 
 let auth = null;
+let currentZone = 0;      // index ke ZONES
+let labels = {};          // { deviceId: "Nama tanaman" } dari RTDB
+let isAdmin = false;
+let zoneTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     if (DEMO_MODE) {
@@ -11,12 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('onlineBadge').classList.remove('on', 'off');
         document.getElementById('onlineBadge').classList.add('demo');
         document.getElementById('onlineText').textContent = 'Demo Mode';
+        applyRole(ADMIN_EMAIL);   // demo: tampilkan UI admin
+        buildZoneSelect();
         loadDemoData();
         return;
     }
 
     // Firebase Auth: tanda tangan Email/Password sebelum data dimuat.
-    // config.js menyediakan firebaseConfig, DB_URL, DEVICE_ID (jangan di-commit).
+    // config.js menyediakan firebaseConfig, DB_URL, ZONES, ADMIN_EMAIL.
     // Persistence default = local: sesi tersimpan di browser, auto-login tiap buka.
     firebase.initializeApp(firebaseConfig);
     auth = firebase.auth();
@@ -29,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
             login.classList.add('hidden');
             document.getElementById('userEmail').textContent = user.email;
             document.getElementById('userAvatar').textContent = (user.email || '?').charAt(0).toUpperCase();
+            applyRole(user.email);
             startDashboard();
         } else {
             app.classList.add('hidden');
@@ -53,6 +60,25 @@ document.addEventListener('DOMContentLoaded', () => {
 function signOut() {
     if (DEMO_MODE) return;
     auth.signOut().catch(e => console.error("Gagal logout:", e));
+}
+
+function zoneId() {
+    return ZONES[currentZone].id;
+}
+
+function zoneName() {
+    return labels[zoneId()] || ZONES[currentZone].name;
+}
+
+// Kontrol aktuator & set label hanya untuk admin. RTDB rules yang sesungguhnya
+// menolak non-admin; ini menyembunyikan UI supaya tidak membingungkan.
+function applyRole(email) {
+    isAdmin = (email === ADMIN_EMAIL);
+    document.getElementById('ctrlCard').classList.toggle('hidden', !isAdmin);
+    document.getElementById('labelBtn').classList.toggle('hidden', !isAdmin);
+    const badge = document.getElementById('roleBadge');
+    badge.textContent = isAdmin ? 'Admin' : 'Mode lihat';
+    badge.classList.toggle('admin', isAdmin);
 }
 
 Chart.defaults.color = '#64748b';
@@ -81,8 +107,77 @@ const sensorChart = new Chart(document.getElementById('sensorChart').getContext(
 let lastData = null;
 
 function startDashboard() {
-    fetchDataLogs();
-    setInterval(fetchDataLogs, 10000);
+    buildZoneSelect();
+    loadLabels().then(() => {
+        fetchDataLogs();
+        zoneTimer = setInterval(fetchDataLogs, 10000);
+    });
+}
+
+function buildZoneSelect() {
+    const sel = document.getElementById('zoneSelect');
+    sel.innerHTML = '';
+    ZONES.forEach((z, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = labels[z.id] || z.name;
+        sel.appendChild(opt);
+    });
+    sel.value = currentZone;
+    sel.onchange = () => {
+        currentZone = parseInt(sel.value, 10) || 0;
+        lastData = null;
+        fetchDataLogs();
+    };
+    document.getElementById('zoneDevice').textContent = zoneId();
+    document.getElementById('zoneCount').textContent =
+        ZONES.length > 1 ? ZONES.length + ' greenhouse' : '';
+}
+
+async function loadLabels() {
+    if (DEMO_MODE) return;
+    try {
+        const token = await auth.currentUser.getIdToken();
+        const res = await fetch(`${DB_URL}/labels.json?auth=${token}`);
+        if (!res.ok) return;
+        labels = (await res.json()) || {};
+    } catch (e) {
+        console.warn("Label tidak terbaca:", e.message);
+    }
+}
+
+function renameZone() {
+    if (DEMO_MODE) {
+        const n = prompt('Nama greenhouse', zoneName());
+        if (n) { labels[zoneId()] = n.trim(); buildZoneSelect(); }
+        return;
+    }
+    const n = prompt('Nama greenhouse untuk ' + zoneId() + ':', zoneName());
+    if (!n) return;
+    const val = n.trim();
+    const status = document.getElementById('cmdStatus');
+    sendLabel(val).then(ok => {
+        if (!ok) { status.textContent = "Gagal menyimpan nama: akses ditolak"; }
+        else { labels[zoneId()] = val; buildZoneSelect(); }
+        setTimeout(() => status.textContent = "", 4000);
+    });
+}
+
+async function sendLabel(value) {
+    if (DEMO_MODE) return true;
+    try {
+        const token = await auth.currentUser.getIdToken();
+        // null menghapus label -> dashboard kembali ke nama default.
+        const res = await fetch(`${DB_URL}/labels/${zoneId()}.json?auth=${token}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(value)
+        });
+        return res.ok;
+    } catch (e) {
+        console.error(e);
+        return false;
+    }
 }
 
 function loadDemoData() {
@@ -162,7 +257,7 @@ function fmtLogTime(ts) {
 async function fetchDataLogs() {
     try {
         const token = await auth.currentUser.getIdToken();
-        const res = await fetch(`${DB_URL}/sensor_logs.json?orderBy="$key"&limitToLast=20&auth=${token}`);
+        const res = await fetch(`${DB_URL}/zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=20&auth=${token}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const obj = await res.json();
         if (!obj) throw new Error('kosong');
@@ -175,7 +270,10 @@ async function fetchDataLogs() {
         if (!lastData) throw new Error('kosong');
 
         renderLogs(data);
-        setOnline(true);
+        // Offline bukan cuma fetch gagal: log terakhir yang basi juga berarti
+        // ESP32 yang hidup tapi tidak push (padam/offline).
+        const age = Math.floor(Date.now() / 1000) - lastData.ts;
+        setOnline(true, age);
     } catch (err) {
         console.error("Gagal memuat data:", err.message);
         setOnline(false);
@@ -197,14 +295,20 @@ function updateActuatorStates() {
     document.getElementById('sw-auto').checked = !manual;
 }
 
-function setOnline(ok) {
+function setOnline(ok, age) {
     const badge = document.getElementById('onlineBadge');
     const text = document.getElementById('onlineText');
     badge.classList.remove('on', 'off', 'demo');
     badge.classList.add(ok ? 'on' : 'off');
+    const name = zoneName();
     text.textContent = ok
-        ? 'ESP Online · ' + new Date().toLocaleTimeString('id-ID')
-        : 'ESP Offline';
+        ? name + ' online · ' + new Date().toLocaleTimeString('id-ID')
+        : name + ' offline';
+    if (ok && typeof age === 'number' && age > 60) {
+        text.textContent = name + ' diam ' + Math.round(age / 60) + ' menit';
+        badge.classList.remove('on');
+        badge.classList.add('off');
+    }
 }
 
 async function sendCommand(action, value) {
@@ -232,13 +336,13 @@ async function sendCommand(action, value) {
     }
     try {
         const token = await auth.currentUser.getIdToken();
-        const res = await fetch(`${DB_URL}/commands/${DEVICE_ID}.json?auth=${token}`, {
+        const res = await fetch(`${DB_URL}/commands/${zoneId()}.json?auth=${token}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: action, value: value })
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        status.textContent = "Perintah " + action + " terkirim (dieksekusi hingga 5 detik)";
+        status.textContent = "Perintah " + action + " terkirim ke " + zoneId() + " (dieksekusi hingga 5 detik)";
     } catch (e) {
         status.textContent = "Gagal kirim: " + e.message;
     }
