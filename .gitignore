@@ -9,10 +9,15 @@ firmware/src/secrets.h
 .clangd/
 compile_commands.json
 
-# OpenCode: config & state lokal (dibaca langsung dari disk, tidak perlu di-git)
-.opencode/
-opencode.json
-AGENTS.md
+# Dokumentasi internal tim (setup RTDB, rules, deploy), bukan untuk repo/deploy
+web/TUTORIAL.md
+
+# Audit internal + listing direktori leftovers
+audit-smart-greenhouse.md
+dir.txt
+
+# Lock file OnlyOffice
+.~lock*#
 
 # Capstone documents (not versioned)
 Asset/
