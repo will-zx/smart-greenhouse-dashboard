@@ -13,6 +13,6 @@ struct SensorData {
 
 void initSensor();
 SensorData readSensors(float soilRaw);
-const char* getLastDHTError();
+const char* getSensorError();
 
 #endif

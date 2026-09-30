@@ -82,6 +82,7 @@ FuzzyOutput fuzzyDecision(float temp, float humidity, float soilMoisture, float 
     FuzzyOutput out;
     out.mistOn = mistLevel > 0.1;
     out.blowerOn = blowerLevel > 0.1;
+    out.blowerLevel = blowerLevel;
     out.status = status;
     return out;
 }

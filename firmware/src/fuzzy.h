@@ -6,6 +6,7 @@
 struct FuzzyOutput {
     bool mistOn;
     bool blowerOn;
+    float blowerLevel;   // 0..1, untuk kecepatan PWM blower (presisi VPD)
     const char* status;
 };
 

@@ -10,25 +10,74 @@
 static WiFiClientSecure client;
 static HTTPClient http;
 
-// ponytail: setInsecure(true) melepas verifikasi CA. Ceiling: development/test.
-// Untuk produksi: client.setCACert(<root cert google>) — tambah ~2KB flash.
-static void httpBegin(const String& path) {
+// Token akun perangkat. Valid 1 jam; di-refresh sebelum itu agar tidak
+// expired di tengah push.
+static String idToken;
+static unsigned long tokenExpiryMs = 0;
+
+// Login perangkat via Firebase Auth REST (Identity Toolkit).
+// Idempotent: skip kalau masih ada > TOKEN_REFRESH_MS tersisa.
+static bool ensureToken() {
+    if (idToken.length() > 0 && millis() < tokenExpiryMs) return true;
+    if (WiFi.status() != WL_CONNECTED) return false;
+
     client.setInsecure();
-    String url = String(FIREBASE_DB_URL) + path + ".json";
-    if (String(FIREBASE_DB_SECRET).length() > 0) {
-        url += "?auth=" + String(FIREBASE_DB_SECRET);
-    }
+    String url = String("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=")
+                 + FIREBASE_API_KEY;
+    String body = String("{\"email\":\"") + DEVICE_EMAIL + "\",\"password\":\""
+                  + DEVICE_PASSWORD + "\",\"returnSecureToken\":true}";
+
     http.begin(client, url);
     http.addHeader("Content-Type", "application/json");
+    int code = http.POST(body);
+    String payload = http.getString();
+    http.end();
+
+    if (code != 200) {
+        Serial.printf("[fb] login gagal: HTTP %d %s\n", code, payload.c_str());
+        return false;
+    }
+    JsonDocument doc;
+    if (deserializeJson(doc, payload) || doc["idToken"].isNull()) {
+        Serial.println("[fb] login gagal: idToken tidak ada di respons");
+        return false;
+    }
+    idToken = doc["idToken"].as<String>();
+    // expiresIn dalam detik; kurangi margin supaya tidak expired saat dipakai.
+    long expiresIn = doc["expiresIn"] | 3600L;
+    tokenExpiryMs = millis() + (unsigned long)(expiresIn * 1000L) - TOKEN_REFRESH_MS;
+    Serial.printf("[fb] login perangkat OK (%s), token %d menit\n",
+                  DEVICE_EMAIL, (int)(expiresIn / 60));
+    return true;
 }
 
-void pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc,
-                   const char* statusSistem, bool manualMode) {
-    if (WiFi.status() != WL_CONNECTED) return;
+// Paksa login ulang (dipakai saat server menolak dengan 401).
+static void invalidateToken() {
+    idToken = "";
+    tokenExpiryMs = 0;
+}
+
+// ponytail: setInsecure(true) melepas verifikasi CA. Ceiling: development/test.
+// Untuk produksi: client.setCACert(<root cert google>) — tambah ~2KB flash.
+static bool httpPost(const String& path, const String& body) {
+    if (!ensureToken()) return false;
+    client.setInsecure();
+    String url = String(FIREBASE_DB_URL) + path + ".json?auth=" + idToken;
+    http.begin(client, url);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST(body);
+    http.end();
+    if (code == 401) invalidateToken();   // token expired/kadaluarsa
+    return code >= 200 && code < 300;
+}
+
+bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc,
+                   const char* statusSistem, bool manualMode, String* bodyOut) {
+    if (WiFi.status() != WL_CONNECTED) return false;
 
     // ts = epoch (NTP). Skip saat NTP belum sinkron supaya tidak tercatat epoch 1970.
     time_t ts = time(nullptr);
-    if (ts < 100000) return;
+    if (ts < 100000) return false;
 
     JsonDocument doc;
     doc["temperature"] = temperature;
@@ -39,23 +88,31 @@ void pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["status_sistem"] = statusSistem;
     doc["manual_mode"] = manualMode;
     doc["ts"] = ts;
+    doc["device"] = DEVICE_ID;
     String body;
     serializeJson(doc, body);
+    if (bodyOut) *bodyOut = body;
 
-    httpBegin("/sensor_logs");
-    int code = http.POST(body);
-    if (code < 200 || code >= 300) {
-        Serial.printf("[fb] push log gagal: HTTP %d\n", code);
-    }
-    http.end();
+    bool ok = httpPost(LOGS_PATH, body);
+    if (!ok) Serial.println("[fb] push log gagal (akan diantrekan ke SD)");
+    return ok;
+}
+
+bool httpPostSensorLogs(const String& body) {
+    if (WiFi.status() != WL_CONNECTED) return false;
+    return httpPost(LOGS_PATH, body);
 }
 
 void pollCommands() {
     if (WiFi.status() != WL_CONNECTED) return;
+    if (!ensureToken()) return;
 
-    httpBegin(String("/commands/") + DEVICE_ID);
+    client.setInsecure();
+    String url = String(FIREBASE_DB_URL) + "/commands/" + DEVICE_ID + ".json?auth=" + idToken;
+    http.begin(client, url);
     int code = http.GET();
     if (code != 200) {
+        if (code == 401) invalidateToken();
         http.end();
         return;
     }
@@ -83,6 +140,7 @@ void pollCommands() {
 
     const char* action = target["action"] | "";
     bool on = target["value"] | false;
+    bool isRestart = strcmp(action, "restart") == 0;
 
     if (strcmp(action, "auto") == 0) {
         controlRelease();
@@ -92,13 +150,29 @@ void pollCommands() {
         controlSetIrig(on);
     } else if (strcmp(action, "blower") == 0) {
         controlSetBlower(on);
-    } else if (strcmp(action, "restart") == 0) {
-        ESP.restart();
+    } else if (!isRestart) {
+        Serial.printf("[fb] perintah tidak dikenal: %s\n", action);
     }
-    Serial.printf("[fb] perintah diterima: %s %d\n", action, on);
+    if (!isRestart) Serial.printf("[fb] perintah diterima: %s %d\n", action, on);
 
-    // tandai selesai dengan menghapus entri
-    httpBegin(String("/commands/") + DEVICE_ID + "/" + oldest);
-    http.sendRequest("DELETE", "");
+    // Tandai selesai dengan menghapus entri. WAJIB sebelum restart — kalau tidak,
+    // entri masih ada saat boot dan device restart lagi tanpa henti.
+    client.setInsecure();
+    String delUrl = String(FIREBASE_DB_URL) + "/commands/" + DEVICE_ID + "/" + oldest
+                    + ".json?auth=" + idToken;
+    http.begin(client, delUrl);
+    int delCode = http.sendRequest("DELETE", "");
     http.end();
+
+    if (isRestart) {
+        // ponytail: restart hanya kalau DELETE berhasil. Kalau gagal, jangan restart
+        // (perintah akan terbaca lagi). device tetap jalan & bisa di-restart manual.
+        if (delCode >= 200 && delCode < 300) {
+            Serial.println("[fb] perintah restart, perangkat restart...");
+            delay(200);   // beri waktu DELETE selesai di sisi server
+            ESP.restart();
+        } else {
+            Serial.printf("[fb] restart dibatalkan: DELETE perintah gagal (HTTP %d)\n", delCode);
+        }
+    }
 }
