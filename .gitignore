@@ -29,6 +29,9 @@ opencode.json
 # Backup rules RTDB lokal (jaring pengaman sebelum publish)
 web/rules_rtdb.bak
 
+# Pipeline keseluruhan proyek (lokal, bukan untuk repo/deploy)
+PIPELINE.md
+
 # Capstone documents (not versioned)
 Asset/
 Dokumen_Pendukung/
