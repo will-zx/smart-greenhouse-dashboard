@@ -5,6 +5,6 @@
 #include "config.h"
 
 void initActuators();
-void setActuators(bool mist, bool irigasi, bool blower, float blowerLevel);
+void setActuators(bool mist, bool blower, float blowerLevel);
 
 #endif

@@ -71,7 +71,7 @@ static bool httpPost(const String& path, const String& body) {
     return code >= 200 && code < 300;
 }
 
-bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc,
+bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
                    const char* statusSistem, bool manualMode, String* bodyOut) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
@@ -85,6 +85,7 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["soil"] = soil;
     doc["vpd"] = vpd;
     doc["et0"] = etc;
+    doc["tds"] = tds;
     doc["status_sistem"] = statusSistem;
     doc["manual_mode"] = manualMode;
     doc["ts"] = ts;

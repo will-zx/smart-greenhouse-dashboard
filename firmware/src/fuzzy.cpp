@@ -23,12 +23,18 @@ static float soilWet(float s)     { return trimf(s, 60, 80, 100); }
 static float vpdLow(float v)  { return trimf(v, 0.0, 0.2, 0.5); }
 static float vpdHigh(float v) { return trimf(v, 1.3, 1.6, 2.0); }
 
+// ETc (Blaney-Criddle, mm): kebutuhan air tanaman. Tepi membership "tinggi"
+// mempertahankan batas lama shouldIrrigate (etc > 6) sebagai area transisi.
+static float etcLow(float e)  { return trimf(e, 0.0, 2.0, 5.0); }
+static float etcHigh(float e) { return trimf(e, 4.0, 6.0, 12.0); }
+
 static const float MIST_LOW = 0.3, MIST_MED = 0.6, MIST_HIGH = 1.0;
 static const float BLOWER_LOW = 0.4, BLOWER_MED = 0.7, BLOWER_HIGH = 1.0;
+static const float IRR_LOW = 0.5, IRR_HIGH = 1.0;
 
 // ponytail: rule dalam tabel (bukan banyak if) — index sama di a & b = satu
 // anteseden; level 0 hanya menambah bobot (mengencerkan rata-rata = "off").
-enum { T_COLD, T_OPT, T_HOT, H_LOW, H_OPT, H_HIGH, S_DRY, S_OPT, S_WET, V_LOW, V_HIGH };
+enum { T_COLD, T_OPT, T_HOT, H_LOW, H_OPT, H_HIGH, S_DRY, S_OPT, S_WET, V_LOW, V_HIGH, E_LOW, E_HIGH };
 
 static const struct { int a, b; float lvl; } MIST_RULES[] = {
     { T_HOT, S_DRY, MIST_HIGH },
@@ -50,12 +56,23 @@ static const struct { int a, b; float lvl; } BLOWER_RULES[] = {
     { T_COLD, T_COLD, 0.0 },
 };
 
-FuzzyOutput fuzzyDecision(float temp, float humidity, float soilMoisture, float vpd) {
+// Irigasi: soil = kondisi nyata zona akar, ETc = kebutuhan atmosfer.
+// Murni fuzzy — tidak ada bypass hardcoded soil (keputusan pemilik hardware).
+static const struct { int a, b; float lvl; } IRRIG_RULES[] = {
+    { S_DRY, E_HIGH, IRR_HIGH },  // tanah kering + evapotranspirasi tinggi → siram penuh
+    { S_DRY, E_LOW,  IRR_LOW  },  // tanah kering, ET rendah → siram sedang
+    { S_OPT, E_HIGH, IRR_LOW  },  // tanah cukup, ET tinggi → siram sedang
+    { S_OPT, E_LOW,  0.0 },
+    { S_WET, S_WET,  0.0 },       // tanah basah → jangan siram (anti becek/leaching)
+};
+
+FuzzyOutput fuzzyDecision(float temp, float humidity, float soilMoisture, float vpd, float etc) {
     float mu[] = {
         tempCold(temp), tempOptimal(temp), tempHot(temp),
         humLow(humidity), humOptimal(humidity), humHigh(humidity),
         soilDry(soilMoisture), soilOptimal(soilMoisture), soilWet(soilMoisture),
-        vpdLow(vpd), vpdHigh(vpd)
+        vpdLow(vpd), vpdHigh(vpd),
+        etcLow(etc), etcHigh(etc)
     };
 
     float mistSum = 0, mistWeight = 0;
@@ -73,6 +90,13 @@ FuzzyOutput fuzzyDecision(float temp, float humidity, float soilMoisture, float 
     float mistLevel = (mistWeight > 0) ? mistSum / mistWeight : 0.0;
     float blowerLevel = (blowerWeight > 0) ? blowerSum / blowerWeight : 0.0;
 
+    float irrigSum = 0, irrigWeight = 0;
+    for (const auto& r : IRRIG_RULES) {
+        float w = min(mu[r.a], mu[r.b]);
+        irrigSum += w * r.lvl; irrigWeight += w;
+    }
+    float irigasiLevel = (irrigWeight > 0) ? irrigSum / irrigWeight : 0.0;
+
     const char* status;
     if (temp > 34 || temp < 10) status = "Kritis";
     else if (temp > 28 || humidity > 80) status = "Warning";
@@ -83,6 +107,8 @@ FuzzyOutput fuzzyDecision(float temp, float humidity, float soilMoisture, float 
     out.mistOn = mistLevel > 0.1;
     out.blowerOn = blowerLevel > 0.1;
     out.blowerLevel = blowerLevel;
+    out.irigasiOn = irigasiLevel > 0.1;
+    out.irigasiLevel = irigasiLevel;
     out.status = status;
     return out;
 }

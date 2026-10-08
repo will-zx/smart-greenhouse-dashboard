@@ -7,6 +7,7 @@
 #include "fuzzy.h"
 #include "actuator.h"
 #include "control.h"
+#include "tds.h"
 #include "firebase_db.h"
 #include "sd_logger.h"
 #include "oled_display.h"
@@ -17,7 +18,7 @@ static unsigned long lastCmd = 0;
 static unsigned long lastReconnect = 0;
 
 static SensorData sensorData;
-static IrrigationResult irrigation;
+static float etcValue = 0;
 static float vpdValue = 0;
 static const char* systemStatus = "Starting";
 static FuzzyOutput fuzzyOut;
@@ -75,13 +76,13 @@ void setup() {
 void loop() {
     float soilRaw = analogRead(SOIL_PIN);
     sensorData = readSensors(soilRaw);
+    float tdsPpm = readTDS(sensorData.temperature);
 
     if (sensorData.valid) {
         vpdValue = calculateVPD(sensorData.temperature, sensorData.humidity);
-        irrigation = calculateIrrigation(sensorData.temperature,
-                                         sensorData.soilMoisture);
+        etcValue = calculateEtc(sensorData.temperature);
         fuzzyOut = fuzzyDecision(sensorData.temperature, sensorData.humidity,
-                                 sensorData.soilMoisture, vpdValue);
+                                 sensorData.soilMoisture, vpdValue, etcValue);
         systemStatus = fuzzyOut.status;
 
         // Peringatan suhu ekstrem (dulu via Telegram; sekarang serial + OLED).
@@ -103,19 +104,28 @@ void loop() {
     }
 
     bool mist = fuzzyOut.mistOn;
-    bool irigasi = irrigation.shouldIrrigate;
+    bool irigasi = fuzzyOut.irigasiOn;   // keputusan fuzzy; manual via controlApply
     bool blower = fuzzyOut.blowerOn;
     controlApply(&mist, &irigasi, &blower);
     // Manual = 100%; auto = level fuzzy (presisi VPD via PWM).
     float blowerLevel = controlIsManual() ? (blower ? 1.0 : 0.0) : fuzzyOut.blowerLevel;
-    setActuators(mist, irigasi, blower, blowerLevel);
+    setActuators(mist, blower, blowerLevel);
+
+    // Irigasi 4-pompa: manual OFF = batalkan siklus; selain itu serah ke fuzzy
+    // (edge-trigger di irrigationUpdate — cycle sekali per permintaan).
+    if (controlIsManual() && !irigasi) {
+        irrigationAbort();
+    } else {
+        irrigationUpdate(irigasi, tdsPpm);
+    }
+    bool irigasiRunning = irrigationRunning();
 
     if (sensorData.valid) {
-        Serial.printf("T:%.1fC H:%.1f%% Soil:%.1f%% VPD:%.2fkPa ETc:%.1fmm [%s]",
+        Serial.printf("T:%.1fC H:%.1f%% Soil:%.1f%% VPD:%.2fkPa ETc:%.1fmm TDS:%.0fppm [%s]",
                       sensorData.temperature, sensorData.humidity,
-                      sensorData.soilMoisture, vpdValue, irrigation.etc, systemStatus);
+                      sensorData.soilMoisture, vpdValue, etcValue, tdsPpm, systemStatus);
         Serial.printf(" Mist:%s Irig:%s Blower:%s(lv%.0f%%)\n",
-                      mist ? "ON" : "OFF", irigasi ? "ON" : "OFF",
+                      mist ? "ON" : "OFF", irigasiRunning ? "RUN" : "OFF",
                       blower ? "ON" : "OFF", blowerLevel * 100.0);
 
         // Backup lokal: seluruh pembacaan valid dicatat ke MicroSD.
@@ -124,7 +134,7 @@ void loop() {
             char line[128];
             snprintf(line, sizeof(line), "%ld,%.1f,%.1f,%.1f,%.2f,%.1f,%s,%d",
                      (long)ts, sensorData.temperature, sensorData.humidity,
-                     sensorData.soilMoisture, vpdValue, irrigation.etc,
+                     sensorData.soilMoisture, vpdValue, etcValue,
                      systemStatus, (int)controlIsManual());
             sdLogRecord(line);
         }
@@ -158,10 +168,10 @@ void loop() {
             String statusSistem = String(systemStatus);
             if (mist) statusSistem += " MISTING";
             if (blower) statusSistem += " BLOWER";
-            if (irigasi) statusSistem += " IRIGASI";
+            if (irigasiRunning) statusSistem += " IRIGASI";
             String body;
             bool ok = pushSensorLog(sensorData.temperature, sensorData.humidity,
-                                    sensorData.soilMoisture, vpdValue, irrigation.etc,
+                                    sensorData.soilMoisture, vpdValue, etcValue, tdsPpm,
                                     statusSistem.c_str(), controlIsManual(), &body);
             if (ok) {
                 sdFlushBacklog();   // pulih: kirim antrean yang tertunda

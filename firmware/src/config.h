@@ -33,11 +33,23 @@
 // Kalau modul Anda aktif-LOW, set MOSFET_INVERTED 1 (di setActuators).
 // Blower: 2 kipas 12x12cm DIPARALEL pada satu output PWM (LEDC).
 #define MOSFET_MIST     26
-#define MOSFET_IRRIG    27
 #define BLOWER_PIN      25
 #define BLOWER_FREQ     25000
 #define BLOWER_RES      8
 #define MOSFET_INVERTED 0
+
+// Irigasi = 4 pompa dalam satu siklus (state machine di irrigation.cpp):
+// FILL -> FERT -> DIST. Semua via modul MOSFET (hormati MOSFET_INVERTED).
+#define PUMP_FILL          13   // 12V: penampungan utama -> ember campuran (5-10 L)
+#define PUMP_FERT_A        14   // 6V : pupuk A -> ember (fertigasi)
+#define PUMP_FERT_B        15   // 6V : pupuk B -> ember (fertigasi)
+#define PUMP_DIST          32   // 12V: ember campuran -> tanaman
+#define IRRIG_FILL_MS      30000     // durasi isi ember (ukur debit pompa asli)
+#define IRRIG_DIST_MS      120000    // durasi alirkan ke tanaman (timer; tanpa sensor level)
+#define IRRIG_FERT_TIMEOUT_MS 120000 // safety: dosing berhenti walau TDS < target
+#define IRRIG_FERT_PULSE_MS 2000     // pompa fert nyala 2s (mengaduk) -> jeda 1s sampling
+#define IRRIG_FERT_IDLE_MS  1000
+#define IRRIG_TDS_HYSTERESIS 20.0    // toleransi di sekitar TDS_TARGET_PPM
 
 // MicroSD (SPI, pin default VSPI ESP32: SCK 18, MISO 19, MOSI 23, CS 5).
 // Backup lokal: seluruh log + antrian saat push Firebase gagal.
@@ -69,5 +81,14 @@
 // ponytail: nilai sementara dari pembacaan serial; kalibrasi ulang setelah ukur titik basah.
 #define SOIL_DRY   2644
 #define SOIL_WET   1200
+
+// TDS Meter v1.0 (analog, klon DFRobot SEN0244) di ember campuran irigasi.
+// Output ~0..2.3V. GPIO35 = ADC input-only tanpa pull-up. Kompensasi suhu
+// memakai suhu SHT31. Kalibrasi: TDS_CAL_K (set dengan larutan standar).
+#define TDS_PIN         35
+#define TDS_ADC_MAX     4095.0
+#define TDS_REF_VOLT    3.3
+#define TDS_TARGET_PPM  1000.0  // konsentrasi larutan akhir (air penampungan ~400 ppm)
+#define TDS_CAL_K       1.0
 
 #endif
