@@ -22,6 +22,10 @@ dir.txt
 # Plugin OpenCode lokal (state per mesin)
 .opencode/plugins/
 
+# OpenCode & instrucciones lokal (state per mesin)
+AGENTS.md
+opencode.json
+
 # Backup rules RTDB lokal (jaring pengaman sebelum publish)
 web/rules_rtdb.bak
 
