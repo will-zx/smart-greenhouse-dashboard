@@ -105,6 +105,10 @@ const sensorChart = new Chart(document.getElementById('sensorChart').getContext(
 });
 
 let lastData = null;
+// Perintah manual yang sudah kita kirim tapi belum tentu tercermin di log
+// perangkat (device push tiap 20 s). Dipakai supaya switch/Auto langsung
+// berubah saat diklik, dan tidak "balik sendiri" di fetch berikutnya.
+let optimistic = null;
 
 function startDashboard() {
     buildZoneSelect();
@@ -127,6 +131,7 @@ function buildZoneSelect() {
     sel.onchange = () => {
         currentZone = parseInt(sel.value, 10) || 0;
         lastData = null;
+        optimistic = null;
         fetchDataLogs();
     };
     document.getElementById('zoneDevice').textContent = zoneId();
@@ -269,7 +274,22 @@ async function fetchDataLogs() {
         lastData = data[data.length - 1];
         if (!lastData) throw new Error('kosong');
 
+        // Device sudah push log yang mencerminkan perintah kita -> tampilan
+        // optimistis tidak diperlukan lagi. Kalau belum, tahan sampai batas
+        // waktu (poll perintah 5 s + push 20 s + fetch 10 s) supaya switch
+        // tidak balik sendiri ke posisi lama.
+        if (optimistic) {
+            if (lastData.manual_mode === optimistic.manual_mode) {
+                optimistic = null;
+            } else if (Date.now() < optimistic.until) {
+                Object.assign(lastData, optimistic);
+            } else {
+                optimistic = null;
+            }
+        }
+
         renderLogs(data);
+        updateActuatorStates();   // posisi switch & Auto dari status_sistem + manual_mode
         // Offline bukan cuma fetch gagal: log terakhir yang basi juga berarti
         // ESP32 yang hidup tapi tidak push (padam/offline).
         const age = Math.floor(Date.now() / 1000) - lastData.ts;
@@ -311,27 +331,38 @@ function setOnline(ok, age) {
     }
 }
 
+// Terapkan perintah ke tampilan segera. Sumber kebenaran tetap perangkat;
+// ini hanya jembatan sampai log baru (yang memuat manual_mode/status_sistem)
+// tiba — lihat penahan `optimistic` di fetchDataLogs().
+function applyLocalCommand(action, value) {
+    if (!lastData) return;
+    let manual = true;
+    let status = lastData.status_sistem || "";
+    if (action === "auto") {
+        manual = false;   // controlRelease() -> kembali ke fuzzy
+    } else {
+        const kw = action === "irigasi" ? "IRIGASI" : (action === "blower" ? "BLOWER" : "MISTING");
+        if (value) {
+            if (!status.includes(kw)) status += " " + kw;
+        } else {
+            status = status.split(" " + kw).join("");
+        }
+    }
+    optimistic = { manual_mode: manual, status_sistem: status, until: Date.now() + 35000 };
+    lastData.manual_mode = manual;
+    lastData.status_sistem = status;
+    updateActuatorStates();
+}
+
 async function sendCommand(action, value) {
     const status = document.getElementById('cmdStatus');
     status.textContent = "Mengirim perintah...";
     if (DEMO_MODE) {
-        let msg;
-        if (action === "auto") {
-            msg = "Demo: mode otomatis (semua kembalikan ke fuzzy)";
-            lastData.manual_mode = false;
-        } else {
-            msg = "Demo: " + action + " " + (value ? "ON" : "OFF");
-            lastData.manual_mode = true;
-            const kw = action === "irigasi" ? "IRIGASI" : (action === "blower" ? "BLOWER" : "MISTING");
-            if (value) {
-                if (!lastData.status_sistem.includes(kw)) lastData.status_sistem += " " + kw;
-            } else {
-                lastData.status_sistem = lastData.status_sistem.split(" " + kw).join("");
-            }
-        }
-        status.textContent = msg;
+        applyLocalCommand(action, value);
+        status.textContent = action === "auto"
+            ? "Demo: mode otomatis (semua kembalikan ke fuzzy)"
+            : "Demo: " + action + " " + (value ? "ON" : "OFF");
         setTimeout(() => status.textContent = "", 4000);
-        updateActuatorStates();
         return;
     }
     try {
@@ -342,6 +373,9 @@ async function sendCommand(action, value) {
             body: JSON.stringify({ action: action, value: value })
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
+        // Auto/switch dimatikan seketika di UI; device mengeksekusi <=5 s lalu
+        // mengonfirmasi lewat push berikutnya (<=20 s).
+        applyLocalCommand(action, value);
         status.textContent = "Perintah " + action + " terkirim ke " + zoneId() + " (dieksekusi hingga 5 detik)";
     } catch (e) {
         status.textContent = "Gagal kirim: " + e.message;
