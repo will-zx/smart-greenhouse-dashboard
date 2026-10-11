@@ -18,31 +18,32 @@
 // di tengah push. 55 menit = 5 menit margin.
 #define TOKEN_REFRESH_MS      3300000
 
-// Sensor: SHT31 (I2C, akurasi ±0.2°C / ±2% RH) — share bus dengan OLED.
-// Alamat default 0x44 (OLED di 0x3C). Modul SHT31 umumnya sudah ada pull-up I2C.
+// Sensor: SHT31 (I2C, akurasi ±0.2°C / ±2% RH) — share bus dengan LCD.
+// Alamat default 0x44 (LCD backpack PCF8574 di 0x27). Modul SHT31 umumnya sudah ada pull-up I2C.
 #define SHT31_I2C_ADDR  0x44
 #define SOIL_PIN        34
 
-// OLED + SHT31 (I2C bus yang sama: SDA 21, SCL 22)
-#define OLED_SDA        21
-#define OLED_SCL        22
-#define OLED_WIDTH      128
-#define OLED_HEIGHT     64
+// I2C bus bersama: SHT31 + LCD 20x4 (backpack PCF8574 0x27; 0x3F = cadangan).
+#define I2C_SDA         21
+#define I2C_SCL         22
+#define LCD_ADDR        0x27
+#define LCD_COLS        20
+#define LCD_ROWS        4
 
-// Aktuator via modul MOSFET 15A/400W (umumnya AKTIF-HIGH: HIGH = ON).
+// Aktuator via modul XY-MOS 400W (umumnya AKTIF-HIGH: HIGH = ON).
 // Kalau modul Anda aktif-LOW, set MOSFET_INVERTED 1 (di setActuators).
 // Blower: 2 kipas 12x12cm DIPARALEL pada satu output PWM (LEDC).
 #define MOSFET_MIST     26
 #define BLOWER_PIN      25
-#define BLOWER_FREQ     25000
+#define BLOWER_FREQ     1000   // XY-MOS: spesifikasi PWM 0-20 kHz (25 kHz mati <100%); 1 kHz teruji
 #define BLOWER_RES      8
 #define MOSFET_INVERTED 0
 
 // Irigasi = 4 pompa dalam satu siklus (state machine di irrigation.cpp):
-// FILL -> FERT -> DIST. Semua via modul MOSFET (hormati MOSFET_INVERTED).
+// FILL -> FERT -> DIST. Semua via modul XY-MOS/MOSFET (hormati MOSFET_INVERTED).
 #define PUMP_FILL          13   // 12V: penampungan utama -> ember campuran (5-10 L)
-#define PUMP_FERT_A        14   // 6V : pupuk A -> ember (fertigasi)
-#define PUMP_FERT_B        15   // 6V : pupuk B -> ember (fertigasi)
+#define PUMP_FERT_A        14   // 5V : pupuk A -> ember (fertigasi)
+#define PUMP_FERT_B        15   // 5V : pupuk B -> ember (fertigasi)
 #define PUMP_DIST          32   // 12V: ember campuran -> tanaman
 #define IRRIG_FILL_MS      30000     // durasi isi ember (ukur debit pompa asli)
 #define IRRIG_DIST_MS      120000    // durasi alirkan ke tanaman (timer; tanpa sensor level)
@@ -62,8 +63,8 @@
 #define SD_LOG_FLUSH_EVERY  30
 
 // Timing (SHT31 jauh lebih cepat dari DHT22; delay(2000) di loop dipertahankan
-// agar push DB & OLED tetap stabil).
-#define OLED_INTERVAL   1000
+// agar push DB & LCD tetap stabil).
+#define LCD_INTERVAL    1000
 
 // PSU cadangan: hardware-only — ESP32 + aktuator bisa ditenagai powerbank/PSU
 // kedua saat listrik mati. Tidak ada kode khusus; dokumentasi di Laporan.

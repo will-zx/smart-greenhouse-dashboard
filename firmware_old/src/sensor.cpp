@@ -6,7 +6,7 @@ static Adafruit_SHT31 sht31 = Adafruit_SHT31();
 static bool shtOk = false;
 
 void initSensor() {
-    Wire.begin(OLED_SDA, OLED_SCL);
+    Wire.begin(I2C_SDA, I2C_SCL);
     shtOk = sht31.begin(SHT31_I2C_ADDR);
     if (shtOk) {
         Serial.println("[sensor] SHT31 terdeteksi");

@@ -1,6 +1,6 @@
 #include "actuator.h"
 
-// Modul MOSFET 15A/400W. Umumnya aktif-HIGH (HIGH = ON); kalau modul Anda
+// Modul XY-MOS 400W. Umumnya aktif-HIGH (HIGH = ON); kalau modul Anda
 // aktif-LOW, cukup set MOSFET_INVERTED 1 di config.h.
 static const int BLOWER_CH = 0;
 
@@ -13,7 +13,7 @@ void setActuators(bool mist, bool blower, float blowerLevel) {
 
 void initActuators() {
     pinMode(MOSFET_MIST, OUTPUT);
-    ledcSetup(BLOWER_CH, BLOWER_FREQ, BLOWER_RES);  // 25 kHz: senyap untuk kipas
+    ledcSetup(BLOWER_CH, BLOWER_FREQ, BLOWER_RES);  // 1 kHz: spek XY-MOS 0-20 kHz
     ledcAttachPin(BLOWER_PIN, BLOWER_CH);
 
     // 4 pompa irigasi di-drive state machine irrigation.cpp; pastikan mati di awal.

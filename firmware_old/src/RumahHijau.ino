@@ -10,9 +10,9 @@
 #include "tds.h"
 #include "firebase_db.h"
 #include "sd_logger.h"
-#include "oled_display.h"
+#include "lcd_display.h"
 
-static unsigned long lastOled = 0;
+static unsigned long lastLcd = 0;
 static unsigned long lastPush = 0;
 static unsigned long lastCmd = 0;
 static unsigned long lastReconnect = 0;
@@ -25,6 +25,8 @@ static FuzzyOutput fuzzyOut;
 
 void connectWiFi() {
     WiFi.setTxPower(WIFI_POWER_11dBm);
+    // Modem-sleep bikin handshake TLS sering putus (SSL EOF) di AP tertentu.
+    WiFi.setSleep(false);
     Serial.print("Connecting to WiFi");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     unsigned long start = millis();
@@ -60,7 +62,7 @@ void setup() {
 
     initActuators();
     controlRelease();
-    initOled();
+    initLcd();
     initSdLogger();
     connectWiFi();
 
@@ -70,7 +72,7 @@ void setup() {
     delay(2000);
 
     Serial.println("System initialized!");
-    lastOled = millis();
+    lastLcd = millis();
 }
 
 void loop() {
@@ -85,7 +87,7 @@ void loop() {
                                  sensorData.soilMoisture, vpdValue, etcValue);
         systemStatus = fuzzyOut.status;
 
-        // Peringatan suhu ekstrem (dulu via Telegram; sekarang serial + OLED).
+        // Peringatan suhu ekstrem (serial + LCD; Telegram sudah dihapus).
         static bool alertActive = false;
         bool nowAlert = sensorData.temperature > 38.0 || sensorData.temperature < 10.0;
         if (nowAlert && !alertActive) {
@@ -156,10 +158,10 @@ void loop() {
         }
     }
 
-    if (now - lastOled >= OLED_INTERVAL) {
-        lastOled = now;
-        updateOled(sensorData.temperature, sensorData.humidity,
-                  sensorData.soilMoisture, vpdValue, systemStatus);
+    if (now - lastLcd >= LCD_INTERVAL) {
+        lastLcd = now;
+        updateLcd(sensorData.temperature, sensorData.humidity,
+                  sensorData.soilMoisture, vpdValue, etcValue, tdsPpm, systemStatus);
     }
 
     if (WiFi.status() == WL_CONNECTED) {

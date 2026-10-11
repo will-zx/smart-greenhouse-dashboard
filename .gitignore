@@ -1,5 +1,9 @@
 # Secrets (never commit)
 firmware/src/secrets.h
+firmware_old/src/secrets.h
+
+# Firmware uji coba lokal (bukan bagian repo)
+hw_test/
 
 # Build & tooling artifacts
 .pio/
