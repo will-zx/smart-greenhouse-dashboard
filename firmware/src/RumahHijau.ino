@@ -4,6 +4,8 @@
 #include "config.h"
 #include "sensor.h"
 #include "vpd.h"
+#include "filter.h"
+#include "phase.h"
 #include "irrigation.h"
 #include "fuzzy.h"
 #include "actuator.h"
@@ -32,10 +34,14 @@ struct Snapshot {
     float temperature, humidity, soilMoisture, vpd, etc, tds;
     bool  valid, manual, mist, blower, irigasiRunning;
     char  status[40];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
+    PhaseState phase;   // setelan fase + VPD target (untuk telemetri DB)
 };
 
 static Snapshot gSnap;
 static SemaphoreHandle_t snapMux = nullptr;
+
+// Filter EMA sinyal sensor (lihat filter.h). Alfa dari config.h.
+static EmaFilter tempFilter, humFilter, soilFilter;
 
 static void snapshotPublish(const Snapshot& s) {
     xSemaphoreTake(snapMux, portMAX_DELAY);
@@ -98,6 +104,12 @@ static void controlTask(void* arg) {
     for (;;) {
         float soilRaw = analogRead(SOIL_PIN);
         sensorData = readSensors(soilRaw);
+        // Filter EMA suhu/RH (input VPD) & soil agar VPD dan keputusan irigasi stabil.
+        if (sensorData.valid) {
+            sensorData.temperature  = emaUpdate(tempFilter, sensorData.temperature);
+            sensorData.humidity     = emaUpdate(humFilter, sensorData.humidity);
+            sensorData.soilMoisture = emaUpdate(soilFilter, sensorData.soilMoisture);
+        }
         tdsPpm = readTDS(sensorData.temperature);
 
         if (sensorData.valid) {
@@ -126,11 +138,27 @@ static void controlTask(void* arg) {
         bool mist = fuzzyOut.mistOn;
         bool irigasi = fuzzyOut.irigasiOn;   // keputusan fuzzy; manual via controlApply
         bool blower = fuzzyOut.blowerOn;
+        float blowerLevel = fuzzyOut.blowerLevel;
+
+        // Override VPD setpoint fase (bila admin sudah men-set target dari dashboard):
+        // VPD > target+BAND -> MISTING; VPD < target-BAND -> BLOWER; dalam band -> OFF.
+        // Diterapkan SEBELUM controlApply supaya manual tetap menang.
+        if (sensorData.valid && phaseActive()) {
+            float target = phaseVpdTarget();
+            if (vpdValue > target + VPD_BAND_KPA) {
+                mist = true;  blower = false; blowerLevel = 0.0;
+            } else if (vpdValue < target - VPD_BAND_KPA) {
+                mist = false; blower = true;  blowerLevel = 1.0;
+            } else {
+                mist = false; blower = false; blowerLevel = 0.0;
+            }
+        }
+
         controlApply(&mist, &irigasi, &blower);
         bool manual = controlIsManual();
-        // Manual = 100%; auto = level fuzzy (presisi VPD via PWM).
-        float blowerLevel = manual ? (blower ? 1.0 : 0.0) : fuzzyOut.blowerLevel;
-        setActuators(mist, blower, blowerLevel);
+        // Manual = 100%; auto = level fuzzy/VPD (presisi VPD via PWM).
+        float bl = manual ? (blower ? 1.0 : 0.0) : blowerLevel;
+        setActuators(mist, blower, bl);
 
         // Irigasi 4-pompa: manual OFF = batalkan siklus; selain itu serah ke fuzzy
         // (edge-trigger di irrigationUpdate — cycle sekali per permintaan).
@@ -145,9 +173,10 @@ static void controlTask(void* arg) {
             Serial.printf("T:%.1fC H:%.1f%% Soil:%.1f%% VPD:%.2fkPa ETc:%.1fmm TDS:%.0fppm [%s]",
                           sensorData.temperature, sensorData.humidity,
                           sensorData.soilMoisture, vpdValue, etcValue, tdsPpm, systemStatus);
-            Serial.printf(" Mist:%s Irig:%s Blower:%s(lv%.0f%%)\n",
+            Serial.printf(" Mist:%s Irig:%s Blower:%s(lv%.0f%%) Fase:%s VPDtgt:%.2f\n",
                           mist ? "ON" : "OFF", irigasiRunning ? "RUN" : "OFF",
-                          blower ? "ON" : "OFF", blowerLevel * 100.0);
+                          blower ? "ON" : "OFF", bl * 100.0,
+                          phaseGet().name, phaseVpdTarget());
 
             // Backup lokal: seluruh pembacaan valid dicatat ke MicroSD.
             time_t ts = time(nullptr);
@@ -186,6 +215,7 @@ static void controlTask(void* arg) {
         if (mist) strncat(s.status, " MISTING", sizeof(s.status) - strlen(s.status) - 1);
         if (blower) strncat(s.status, " BLOWER", sizeof(s.status) - strlen(s.status) - 1);
         if (irigasiRunning) strncat(s.status, " IRIGASI", sizeof(s.status) - strlen(s.status) - 1);
+        s.phase = phaseGet();
         snapshotPublish(s);
 
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(2000));
@@ -226,7 +256,7 @@ static void netTask(void* arg) {
                 lastPush = now;
                 String body;
                 bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
-                                        s.vpd, s.etc, s.tds, s.status, s.manual, &body);
+                                        s.vpd, s.etc, s.tds, s.status, s.manual, s.phase, &body);
                 if (ok) {
                     sdFlushBacklog();   // pulih: kirim antrean yang tertunda
                 } else if (body.length() > 0) {
@@ -254,6 +284,10 @@ void setup() {
     initLcd();
     initSdLogger();
     initSensor();
+    emaInit(tempFilter, EMA_ALPHA_TEMP);
+    emaInit(humFilter, EMA_ALPHA_HUM);
+    emaInit(soilFilter, EMA_ALPHA_SOIL);
+    phaseInit();
     delay(2000);
 
     snapMux = xSemaphoreCreateMutex();

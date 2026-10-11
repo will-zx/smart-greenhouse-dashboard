@@ -1,6 +1,7 @@
 #include "firebase_db.h"
 #include "config.h"
 #include "control.h"
+#include "phase.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -72,7 +73,8 @@ static bool httpPost(const String& path, const String& body) {
 }
 
 bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
-                   const char* statusSistem, bool manualMode, String* bodyOut) {
+                   const char* statusSistem, bool manualMode, const PhaseState& phase,
+                   String* bodyOut) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
     // ts = epoch (NTP). Skip saat NTP belum sinkron supaya tidak tercatat epoch 1970.
@@ -88,6 +90,13 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["tds"] = tds;
     doc["status_sistem"] = statusSistem;
     doc["manual_mode"] = manualMode;
+    // Telemetri fase & VPD target (di-set admin dari dashboard).
+    doc["fase"] = phase.name;
+    doc["vpd_target"] = phase.vpdTarget;
+    doc["fase_aktif"] = phase.active;
+    doc["fase_durasi_s"] = phase.durationSec;
+    doc["fase_elapsed_s"] = phase.elapsedSec;
+    doc["fase_sisa_s"] = phase.remainingSec;
     doc["ts"] = ts;
     doc["device"] = DEVICE_ID;
     String body;
@@ -140,7 +149,8 @@ void pollCommands() {
     }
 
     const char* action = target["action"] | "";
-    bool on = target["value"] | false;
+    JsonVariant value = target["value"];
+    bool on = value | false;
     bool isRestart = strcmp(action, "restart") == 0;
 
     if (strcmp(action, "auto") == 0) {
@@ -151,10 +161,47 @@ void pollCommands() {
         controlSetIrig(on);
     } else if (strcmp(action, "blower") == 0) {
         controlSetBlower(on);
+    } else if (strcmp(action, "set_vpd") == 0) {
+        // value = VPD target (kPa). Contoh: {"action":"set_vpd","value":1.2}
+        if (value.is<int>() || value.is<float>()) {
+            float v = value.as<float>();
+            phaseSetVpd(v);
+            Serial.printf("[fb] set VPD target: %.2f kPa\n", v);
+        } else {
+            Serial.println("[fb] set_vpd: nilai tidak valid");
+        }
+    } else if (strcmp(action, "set_fase") == 0 || strcmp(action, "set_phase") == 0) {
+        // value = nama fase. Contoh: {"action":"set_fase","value":"Generatif"}
+        const char* nm = value | "";
+        if (nm[0] != '\0') {
+            phaseSetName(nm);
+            Serial.printf("[fb] set fase: %s\n", nm);
+        } else {
+            Serial.println("[fb] set_fase: nama kosong");
+        }
+    } else if (strcmp(action, "set_durasi") == 0 || strcmp(action, "set_duration") == 0) {
+        // value = angka; unit opsional "detik"|"menit"|"jam"|"hari" (default detik).
+        // Contoh: {"action":"set_durasi","value":14,"unit":"hari"}
+        float num = value | 0.0f;
+        const char* unit = target["unit"] | "detik";
+        uint32_t sec = (uint32_t)num;
+        if (strcmp(unit, "menit") == 0)      sec = (uint32_t)(num * 60.0f);
+        else if (strcmp(unit, "jam") == 0)   sec = (uint32_t)(num * 3600.0f);
+        else if (strcmp(unit, "hari") == 0)  sec = (uint32_t)(num * 86400.0f);
+        phaseSetDuration(sec);
+        Serial.printf("[fb] set durasi fase: %.0f %s (%lu detik)\n",
+                      num, unit, (unsigned long)sec);
+    } else if (strcmp(action, "fase_reset") == 0 || strcmp(action, "phase_reset") == 0) {
+        phaseReset();
+        Serial.println("[fb] fase direset (penghitung durasi mulai dari nol)");
     } else if (!isRestart) {
         Serial.printf("[fb] perintah tidak dikenal: %s\n", action);
     }
-    if (!isRestart) Serial.printf("[fb] perintah diterima: %s %d\n", action, on);
+    // Log ringkas hanya untuk perintah boolean (set_* sudah mencetak sendiri).
+    if (strcmp(action, "auto") == 0 || strcmp(action, "mist") == 0 ||
+        strcmp(action, "irigasi") == 0 || strcmp(action, "blower") == 0) {
+        Serial.printf("[fb] perintah diterima: %s %d\n", action, on);
+    }
 
     // Tandai selesai dengan menghapus entri. WAJIB sebelum restart — kalau tidak,
     // entri masih ada saat boot dan device restart lagi tanpa henti.

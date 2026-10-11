@@ -92,4 +92,23 @@
 #define TDS_TARGET_PPM  1000.0  // konsentrasi larutan akhir (air penampungan ~400 ppm)
 #define TDS_CAL_K       1.0
 
+// Filter EMA (Exponential Moving Average): y[n] = alpha*x[n] + (1-alpha)*y[n-1].
+// alpha kecil = lebih halus tapi lebih lambat. Dipakai untuk suhu & kelembaban
+// (input VPD) serta soil, agar VPD dan keputusan irigasi tidak bergetar.
+#define EMA_ALPHA_TEMP  0.2f
+#define EMA_ALPHA_HUM   0.2f
+#define EMA_ALPHA_SOIL  0.2f
+
+// Kontrol VPD berbasis setpoint fase (di-set admin dari dashboard). Jika VPD
+// target aktif: VPD > target+BAND -> MISTING; VPD < target-BAND -> BLOWER;
+// dalam band -> OFF. Manual override tetap menang.
+#define VPD_BAND_KPA    0.2f
+
+// Setelan fase default (dipakai bila NVS masih kosong). Admin dapat mengubah
+// nama fase, VPD target, dan durasi dari dashboard; tersimpan di NVS.
+#define PHASE_DEFAULT_VPD       1.0f       // kPa
+#define PHASE_DEFAULT_NAME      "Vegetatif"
+#define PHASE_DEFAULT_DURATION  0u         // detik; 0 = tanpa batas
+#define NVS_NAMESPACE           "smartgh"
+
 #endif
