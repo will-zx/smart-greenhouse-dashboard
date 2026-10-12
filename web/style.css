@@ -9,12 +9,6 @@
     --accent-2: #0ea5e9;
     --soil: #2e7d32;
     --danger: #c62828;
-    /* warna aksen per metrik (dipakai lewat --mc di .metric) */
-    --temp: #c62828;
-    --hum: #0277bd;
-    --vpd: #1565c0;
-    --et0: #b8860b;
-    --tds: #6a1b9a;
     --warn: #b8860b;
     --header-bg: #0f4c81;
     --header-bg-end: #1565c0;
@@ -298,17 +292,17 @@ body {
     align-items: center;
     gap: 6px;
     font-size: 11px;
-    color: var(--mc, var(--muted));
+    color: var(--muted);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
 }
-.metric .label svg { color: var(--mc, var(--accent)); }
+.metric .label svg { color: var(--accent); }
 .metric .value {
     font-size: 30px;
     font-weight: 800;
     margin-top: 8px;
-    color: var(--mc, var(--text));
+    color: var(--text);
     line-height: 1.1;
 }
 .metric .value small { font-size: 14px; font-weight: 600; color: var(--muted); }
@@ -342,11 +336,8 @@ tbody td {
     white-space: nowrap;
 }
 tbody tr:hover { background: #f0f5fc; }
-.temp { color: #c62828; font-weight: 700; }
-.hum { color: #0277bd; font-weight: 700; }
-.soil { color: #2e7d32; font-weight: 700; }
-.vpd { color: #1565c0; font-weight: 600; }
-.et0 { color: #b8860b; font-weight: 600; }
+/* Nilai sensor di tabel seragam; hanya pill status yang berwarna (makna). */
+tbody td.num { color: var(--text); font-weight: 600; }
 .pill {
     display: inline-block;
     padding: 3px 10px;
@@ -378,7 +369,6 @@ tbody tr:hover { background: #f0f5fc; }
 .refresh svg { color: var(--accent); }
 .empty { text-align: center; color: var(--muted); padding: 24px; }
 .empty.error { color: var(--danger); }
-.tds { color: #6a1b9a; font-weight: 600; }
 .fresh { text-align: right; font-size: 11px; color: var(--muted); margin-top: 10px; min-height: 14px; }
 
 .login-overlay {

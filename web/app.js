@@ -278,12 +278,12 @@ function renderLogs(data) {
         tableBody.innerHTML += `
             <tr>
                 <td>${fmtLogTime(log.ts)}</td>
-                <td class="temp">${f(log.temperature)}</td>
-                <td class="hum">${f(log.humidity)}</td>
-                <td class="soil">${f(saneSoil(log.soil), 0)}</td>
-                <td class="vpd">${f(log.vpd)}</td>
-                <td class="et0">${f(log.et0)}</td>
-                <td class="tds">${f(log.tds, 0)}</td>
+                <td class="num">${f(log.temperature)}</td>
+                <td class="num">${f(log.humidity)}</td>
+                <td class="num">${f(saneSoil(log.soil), 0)}</td>
+                <td class="num">${f(log.vpd)}</td>
+                <td class="num">${f(log.et0)}</td>
+                <td class="num">${f(log.tds, 0)}</td>
                 <td>${pill}</td>
             </tr>`;
     });
