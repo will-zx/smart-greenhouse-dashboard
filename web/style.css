@@ -44,12 +44,14 @@ body {
     color: #fff;
 }
 /* greenhouse.png = garis hitam pekat dengan alpha transparan (tanpa latar putih).
-   Dipakai sebagai mask supaya ikon bisa diberi warna lewat CSS, sama seperti
-   ikon svg lama yang memakai currentColor #90caf9. */
+   WAJIB elemen kosong (bukan <img>): mask berlaku ke seluruh rendering
+   elemen, dan konten <img> bersifat opaque sehingga menutupi background-color
+   di belakangnya -> ikon tetap hitam. Warna lewat background-color. */
 .header-icon {
-    width: 22px;
-    height: 22px;
-    background-color: #90caf9;
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    background-color: #fff;
     -webkit-mask: url(greenhouse.png) no-repeat center / contain;
     mask: url(greenhouse.png) no-repeat center / contain;
 }
