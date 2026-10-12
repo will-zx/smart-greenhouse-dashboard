@@ -9,9 +9,10 @@ Realtime Database.
 
 ![Dashboard](docs/dashboard.png)
 
-Dashboard menampilkan lima metrik real-time (suhu, kelembapan, kandungan air
-tanah, VPD, dan ET0), panel kontrol aktuator yang hanya terlihat untuk admin,
-grafik tren 20 titik terakhir, serta histori log sensor dalam tabel.
+Dashboard menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
+tanah, VPD, ET0, dan TDS), panel kontrol aktuator yang hanya terlihat untuk
+admin, grafik tren 20 titik terakhir, serta histori log sensor dalam tabel.
+Tampilan menyesuaikan lebar layar, dari ponsel sampai monitor lebar.
 
 ## Hardware
 
