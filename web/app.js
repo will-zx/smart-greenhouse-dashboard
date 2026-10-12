@@ -34,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
             app.classList.remove('hidden');
             login.classList.add('hidden');
             document.getElementById('userEmail').textContent = user.email;
-            document.getElementById('userTip').textContent = user.email;
             document.getElementById('userAvatar').textContent = (user.email || '?').charAt(0).toUpperCase();
             applyRole(user.email);
             startDashboard();
@@ -242,7 +241,6 @@ function loadDemoData() {
     updateActuatorStates();
     updateFreshness(20);
     document.getElementById('userEmail').textContent = 'demo@smartgreenhouse.local';
-    document.getElementById('userTip').textContent = 'demo@smartgreenhouse.local';
     document.getElementById('userAvatar').textContent = 'D';
     const badge = document.getElementById('onlineText');
     badge.textContent = 'Demo Mode';
