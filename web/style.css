@@ -43,7 +43,16 @@ body {
     letter-spacing: 0.2px;
     color: #fff;
 }
-.header h1 svg { color: #90caf9; }
+/* greenhouse.png = garis hitam pekat dengan alpha transparan (tanpa latar putih).
+   Dipakai sebagai mask supaya ikon bisa diberi warna lewat CSS, sama seperti
+   ikon svg lama yang memakai currentColor #90caf9. */
+.header-icon {
+    width: 22px;
+    height: 22px;
+    background-color: #90caf9;
+    -webkit-mask: url(greenhouse.png) no-repeat center / contain;
+    mask: url(greenhouse.png) no-repeat center / contain;
+}
 .header-actions {
     display: flex;
     align-items: center;
