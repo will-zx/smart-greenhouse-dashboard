@@ -99,10 +99,3 @@ lalu isi `firebaseConfig` dan `DB_URL`.
 ## Lisensi
 
 [GNU General Public License v2.0](LICENSE)
-
-## Kontributor
-
-| Nama | Commit |
-| --- | --- |
-| [will-zx](https://github.com/will-zx) | 23 |
-| [xxaa25](https://github.com/xxaa25) | 1 |
