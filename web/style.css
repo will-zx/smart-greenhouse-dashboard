@@ -131,6 +131,12 @@ body {
     cursor: pointer;
     line-height: 1;
 }
+/* Hilangkan highlight abu-abu bawaan browser saat hover (avatar sudah punya
+   border sendiri). :focus-visible tetap dibiarkan agar navigasi keyboard
+   masih terlihat. */
+.user-chip:hover, .user-chip:active { background: none; box-shadow: none; }
+.user-chip:focus { outline: none; }
+.user-chip:focus-visible { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; border-radius: 50%; }
 /* Email muncul sebagai tooltip saat kursor di atas avatar */
 .user-tip {
     position: absolute;

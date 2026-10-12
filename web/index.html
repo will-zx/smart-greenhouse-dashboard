@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Greenhouse Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=15">
+    <link rel="stylesheet" href="style.css?v=16">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -127,8 +127,8 @@
                     <div class="ctrl">
                         <div>
                             <h3>
-                                <!-- Misting: nozzle menyemprot -->
-                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 8h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z"/><path d="M10 8V5a2 2 0 0 1 2-2h3"/><path d="M7 13h10"/><path d="M19 3v3M21.5 4.5h-3"/></svg>
+                                <!-- Misting: gerimis/kabut -->
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a7 7 0 1 1 11.7-7H17a4.5 4.5 0 0 1 2.5 8.2"/><path d="M8 16v1.5M12 16v2M16 16v1.5"/></svg>
                                 Misting
                             </h3>
                             <p class="sub" id="state-mist">-</p>
@@ -155,8 +155,8 @@
                     <div class="ctrl">
                         <div>
                             <h3>
-                                <!-- Blower: wind (ventilation) -->
-                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/></svg>
+                                <!-- Blower: kipas -->
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z"/><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z" transform="rotate(120 12 12)"/><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z" transform="rotate(240 12 12)"/><circle cx="12" cy="12" r="1.8"/></svg>
                                 Blower
                             </h3>
                             <p class="sub" id="state-blower">-</p>
