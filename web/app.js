@@ -7,6 +7,9 @@ let currentZone = 0;      // index ke ZONES
 let labels = {};          // { deviceId: "Nama tanaman" } dari RTDB
 let isAdmin = false;
 let zoneTimer = null;
+let logData = [];         // log terakhir yang sudah difilter (untuk render tabel)
+let logFilter = '';       // teks pencarian log
+let logLimit = 20;        // berapa baris yang diambil dari RTDB (dropdown "Show N entries")
 
 document.addEventListener('DOMContentLoaded', () => {
     if (DEMO_MODE) {
@@ -35,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
             login.classList.add('hidden');
             document.getElementById('userEmail').textContent = user.email;
             document.getElementById('userAvatar').textContent = (user.email || '?').charAt(0).toUpperCase();
+            document.getElementById('userName').textContent = (user.email || '?').split('@')[0];
             applyRole(user.email);
             startDashboard();
         } else {
@@ -76,6 +80,64 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// Navigasi sidebar: 3 view (Beranda / Kontrol / Log Sensor) tanpa router —
+// cukup tampilkan satu section dan geser penanda aktif. Sidebar jadi drawer
+// off-canvas di layar kecil, dibuka lewat tombol hamburger.
+const VIEW_TITLES = { beranda: 'Beranda', kontrol: 'Kontrol', log: 'Log Sensor' };
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', e => {
+            e.preventDefault();
+            switchView(item.dataset.view);
+            closeNav();
+        });
+    });
+
+    const burger = document.getElementById('burger');
+    burger.addEventListener('click', toggleNav);
+    document.getElementById('navBackdrop').addEventListener('click', closeNav);
+
+    // Search + "Show N entries" hanya relevan di halaman Log.
+    document.getElementById('logSearch').addEventListener('input', e => {
+        logFilter = e.target.value.trim().toLowerCase();
+        renderLogTable();
+    });
+    document.getElementById('showEntries').addEventListener('change', e => {
+        logLimit = parseInt(e.target.value, 10) || 20;
+        // Demo tidak punya auth/RTDB untuk diambil ulang; cukup render ulang.
+        if (DEMO_MODE) renderLogTable();
+        else fetchDataLogs();   // jumlah baris berubah -> ambil ulang dari RTDB
+    });
+});
+
+function switchView(name) {
+    Object.keys(VIEW_TITLES).forEach(v => {
+        document.getElementById('view-' + v).classList.toggle('hidden', v !== name);
+    });
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.view === name);
+    });
+    document.getElementById('pageTitle').textContent = VIEW_TITLES[name] || 'Beranda';
+}
+
+const isNarrow = () => window.matchMedia('(max-width: 900px)').matches;
+
+// Satu tombol, dua perilaku mengikuti lebar layar: di desktop sidebar
+// disembunyikan (nav-closed, konten melebar), di layar kecil sidebar jadi
+// drawer yang muncul lewat nav-open + backdrop.
+function toggleNav() {
+    const open = isNarrow()
+        ? document.body.classList.toggle('nav-open')
+        : document.body.classList.toggle('nav-closed');
+    document.getElementById('burger').setAttribute('aria-expanded', String(open));
+}
+
+function closeNav() {
+    if (!isNarrow()) return;      // di desktop pilihan menu tidak menutup sidebar
+    document.body.classList.remove('nav-open');
+    document.getElementById('burger').setAttribute('aria-expanded', 'false');
+}
+
 function signOut() {
     if (DEMO_MODE) return;
     auth.signOut().catch(e => console.error("Gagal logout:", e));
@@ -98,18 +160,22 @@ function applyRole(email) {
     const badge = document.getElementById('roleBadge');
     badge.textContent = isAdmin ? 'Admin' : 'Mode lihat';
     badge.classList.toggle('admin', isAdmin);
+    document.getElementById('userRole').textContent = isAdmin ? 'Super Admin' : 'Mode Lihat';
 }
 
-Chart.defaults.color = '#64748b';
-Chart.defaults.borderColor = '#dfe6ee';
+// Grafik membaca palet yang sama dengan style.css, jadi tidak ada warna
+// yang "melenceng" dari skema dashboard.
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+Chart.defaults.color = cssVar('--muted');
+Chart.defaults.borderColor = cssVar('--border');
 
 const sensorChart = new Chart(document.getElementById('sensorChart').getContext('2d'), {
     type: 'line',
     data: {
         labels: [],
         datasets: [
-            { label: 'Suhu (°C)', data: [], borderColor: '#c62828', backgroundColor: 'rgba(198,40,40,0.10)', pointRadius: 2, tension: 0.3, yAxisID: 'y' },
-            { label: 'Kelembapan (%)', data: [], borderColor: '#0277bd', backgroundColor: 'rgba(2,119,189,0.10)', pointRadius: 2, tension: 0.3, yAxisID: 'y1' }
+            { label: 'Suhu (°C)', data: [], borderColor: cssVar('--danger'), backgroundColor: 'rgba(220,38,38,0.08)', pointRadius: 2, tension: 0.3, yAxisID: 'y' },
+            { label: 'Kelembapan (%)', data: [], borderColor: cssVar('--accent'), backgroundColor: 'rgba(37,99,235,0.08)', pointRadius: 2, tension: 0.3, yAxisID: 'y1' }
         ]
     },
     options: {
@@ -120,9 +186,9 @@ const sensorChart = new Chart(document.getElementById('sensorChart').getContext(
             // suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
             // garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
             // seperti lonjakan besar.
-            x: { grid: { color: '#eef2f7' }, ticks: { color: '#64748b', maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 } },
-            y: { type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40, grid: { color: '#eef2f7' }, ticks: { color: '#64748b' }, title: { display: true, text: 'Suhu (°C)', color: '#c62828', font: { weight: 600 } } },
-            y1: { type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100, grid: { drawOnChartArea: false }, ticks: { color: '#64748b' }, title: { display: true, text: 'Kelembapan (%)', color: '#0277bd', font: { weight: 600 } } }
+            x: { grid: { color: cssVar('--card-2') }, ticks: { color: cssVar('--muted'), maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 } },
+            y: { type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40, grid: { color: cssVar('--card-2') }, ticks: { color: cssVar('--muted') }, title: { display: true, text: 'Suhu (°C)', color: cssVar('--danger'), font: { weight: 600 } } },
+            y1: { type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100, grid: { drawOnChartArea: false }, ticks: { color: cssVar('--muted') }, title: { display: true, text: 'Kelembapan (%)', color: cssVar('--accent'), font: { weight: 600 } } }
         }
     }
 });
@@ -153,15 +219,34 @@ function buildZoneSelect() {
     sel.value = currentZone;
     // Device id pindah ke title: informasinya tetap ada tanpa memakan lebar header.
     sel.title = 'Perangkat: ' + zoneId() + ' — pilih greenhouse';
-    sel.onchange = () => {
-        currentZone = parseInt(sel.value, 10) || 0;
-        lastData = null;
-        optimistic = null;
-        fetchDataLogs();
-    };
     document.getElementById('zoneCount').textContent =
         ZONES.length > 1 ? ZONES.length + ' greenhouse' : '';
+    // Satu unit saja -> tidak ada yang bisa dipilih, jadi select-nya dinonaktifkan
+    // (nama greenhouse tetap terbaca) alih-alih disembunyikan.
+    sel.disabled = ZONES.length < 2;
 }
+
+// Handler dipasang sekali, bukan di dalam buildZoneSelect() yang dipanggil
+// ulang setiap label termuat (menumpuknya assignment tidak merusak, tapi
+// penempatan yang salah mudah terjadi bila logika approve-nya bertambah).
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('zoneSelect').addEventListener('change', e => {
+        currentZone = parseInt(e.target.value, 10) || 0;
+        lastData = null;
+        optimistic = null;
+        // Buang sisa data zona sebelumnya supaya tabel/grafik tidak sempat
+        // menampilkan Greenhouse lama selagi data baru dimuat.
+        logData = [];
+        logFilter = '';
+        document.getElementById('logSearch').value = '';
+        sensorChart.data.labels = [];
+        sensorChart.data.datasets.forEach(d => d.data = []);
+        sensorChart.update();
+        renderLogTable();
+        setOnline(false);
+        fetchDataLogs();
+    });
+});
 
 async function loadLabels() {
     if (DEMO_MODE) return;
@@ -242,6 +327,7 @@ function loadDemoData() {
     updateFreshness(20);
     document.getElementById('userEmail').textContent = 'demo@smartgreenhouse.local';
     document.getElementById('userAvatar').textContent = 'D';
+    document.getElementById('userName').textContent = 'demo';
     const badge = document.getElementById('onlineText');
     badge.textContent = 'Demo Mode';
     document.getElementById('onlineBadge').classList.remove('off', 'on');
@@ -266,9 +352,26 @@ function renderLogs(data) {
     sensorChart.data.datasets[1].data = data.map(l => l.humidity);
     sensorChart.update();
 
+    logData = data;
+    renderLogTable();
+}
+
+// Tabel log di-filter client-side: baris yang sudah termuat (10/20/50,
+// tergantung dropdown "Show N entries") tidak perlu fetch ulang saat mengetik.
+function renderLogTable() {
+    const f = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '-';
+    const rows = logFilter
+        ? logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.status_sistem || '')).toLowerCase().includes(logFilter))
+        : logData;
+
     const tableBody = document.getElementById('logTableBody');
     tableBody.innerHTML = '';   // sekaligus menghapus baris "Gagal memuat" dari fetch sebelumnya
-    [...data].reverse().forEach(log => {
+    if (!rows.length) {
+        tableBody.innerHTML = `<tr><td colspan="8" class="empty">${logFilter ? 'Tidak ada baris yang cocok' : 'Belum ada data'}</td></tr>`;
+        document.getElementById('logFoot').textContent = '';
+        return;
+    }
+    [...rows].reverse().forEach(log => {
         const s = log.status_sistem || "";
         let pill = '<span class="pill idle">' + s + '</span>';
         if (s.includes("MISTING")) pill = '<span class="pill mist">' + s + '</span>';
@@ -287,6 +390,8 @@ function renderLogs(data) {
                 <td>${pill}</td>
             </tr>`;
     });
+    document.getElementById('logFoot').textContent =
+        logFilter ? `Menampilkan ${rows.length} dari ${logData.length} baris yang cocok` : `Menampilkan ${rows.length} baris terbaru`;
 }
 
 // Soil moisture = 0..100%. Sensor capacitive yang belum terpasang (pin
@@ -311,7 +416,7 @@ function fmtLogTime(ts) {
 async function fetchDataLogs() {
     try {
         const token = await auth.currentUser.getIdToken();
-        const res = await fetch(`${DB_URL}/zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=20&auth=${token}`);
+        const res = await fetch(`${DB_URL}/zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=${logLimit}&auth=${token}`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const obj = await res.json();
         if (!obj) throw new Error('kosong');
@@ -369,13 +474,21 @@ function updateActuatorStates() {
     document.getElementById('sw-mist').checked = s.includes("MISTING");
     document.getElementById('sw-blower').checked = s.includes("BLOWER");
     document.getElementById('sw-irigasi').checked = s.includes("IRIGASI");
-    document.getElementById('state-mist').textContent = s.includes("MISTING") ? "AKTIF" : "mati";
-    document.getElementById('state-blower').textContent = s.includes("BLOWER") ? "AKTIF" : "mati";
-    document.getElementById('state-irigasi').textContent = s.includes("IRIGASI") ? "AKTIF" : "mati";
+    setCtrlState('mist', s.includes("MISTING"));
+    setCtrlState('blower', s.includes("BLOWER"));
+    setCtrlState('irigasi', s.includes("IRIGASI"));
 
     const manual = lastData.manual_mode === true;
-    document.getElementById('state-auto').textContent = manual ? "off (manual)" : "on (otomatis)";
+    setCtrlState('auto', !manual);
     document.getElementById('sw-auto').checked = !manual;
+}
+
+// Kartu kontrol: status "ON"/"OFF" di tengah kartu (gaya referensi), hijau
+// saat aktif dan merah saat mati.
+function setCtrlState(key, on) {
+    const el = document.getElementById('state-' + key);
+    el.textContent = on ? "ON" : "OFF";
+    el.classList.toggle('on', !!on);
 }
 
 function setOnline(ok, age) {

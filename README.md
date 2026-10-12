@@ -9,10 +9,22 @@ Realtime Database.
 
 ![Dashboard](docs/dashboard.png)
 
-Dashboard menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
-tanah, VPD, ET0, dan TDS), panel kontrol aktuator yang hanya terlihat untuk
-admin, grafik tren 20 titik terakhir, serta histori log sensor dalam tabel.
-Tampilan menyesuaikan lebar layar, dari ponsel sampai monitor lebar.
+Layout admin: sidebar kiri (Beranda, Kontrol, Log Sensor) dan topbar biru.
+Tombol hamburger menyembunyikan/munculkan sidebar di desktop, dan menjadi
+drawer di layar kecil. Seluruh tampilan mengikuti satu skema warna yang
+didefinisikan di `style.css`; grafik membaca variabel warna yang sama.
+
+**Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
+tanah, VPD, ET0, dan TDS) plus grafik tren 20 titik terakhir.
+
+**Kontrol** menampilkan kartu tiap aktuator (Misting, Irigasi, Blower, Auto)
+dengan status ON/OFF dan sakelarnya, hanya untuk admin.
+
+![Log sensor](docs/log-sensor.png)
+
+**Log Sensor** menampilkan histori dalam tabel, lengkap dengan pilihan jumlah
+baris (10/20/50) dan pencarian. Tampilan menyesuaikan lebar layar, dari ponsel
+sampai monitor lebar.
 
 ## Hardware
 
