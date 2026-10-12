@@ -338,12 +338,11 @@ body {
 }
 .metric .value small { font-size: 14px; font-weight: 600; color: var(--muted); }
 /* ET0 ditulis dengan subskrip di judul metrik & header tabel */
-/* sub default browser sudah pas posisinya; cukup perkecil hurufnya.
-   Catatan: .metric .label adalah flex container — di dalam flex, vertical-align
-   diabaikan sehingga sub ikut baseline dan tampak seperti superskrip. Pakai
-   offset eksplisit di situ, th (bukan flex) tetap andalkan vertical-align. */
+/* "ET<sub>0</sub>" dibungkus <span> di index.html: .metric .label adalah flex
+   container, dan di dalam flex vertical-align diabaikan serta setiap anak
+   flex item dapat gap sendiri. Dengan satu span, sub kembali jadi teks inline
+   biasa → vertical-align: sub browser bekerja, 0 menempel ke T. */
 .metric .label sub, thead th sub { font-size: 0.75em; }
-.metric .label sub { position: relative; bottom: -0.3em; }
 
 .chart-wrap { position: relative; height: 300px; }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
