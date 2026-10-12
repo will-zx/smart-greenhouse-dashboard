@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
             app.classList.remove('hidden');
             login.classList.add('hidden');
             document.getElementById('userEmail').textContent = user.email;
+            document.getElementById('userTip').textContent = user.email;
             document.getElementById('userAvatar').textContent = (user.email || '?').charAt(0).toUpperCase();
             applyRole(user.email);
             startDashboard();
@@ -54,6 +55,25 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e2) {
             err.textContent = e2.message;
         }
+    });
+});
+
+// Avatar: klik membuka menu akun, klik di luar menutupnya.
+document.addEventListener('DOMContentLoaded', () => {
+    const chip = document.getElementById('userChip');
+    const menu = document.getElementById('userMenu');
+    chip.addEventListener('click', e => {
+        const open = menu.hidden;
+        menu.hidden = !open;
+        chip.setAttribute('aria-expanded', String(open));
+        e.stopPropagation();
+    });
+    document.addEventListener('click', () => {
+        menu.hidden = true;
+        chip.setAttribute('aria-expanded', 'false');
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') menu.hidden = true;
     });
 });
 
@@ -96,10 +116,14 @@ const sensorChart = new Chart(document.getElementById('sensorChart').getContext(
     options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         scales: {
-            x: { grid: { color: '#eef2f7' }, ticks: { color: '#64748b' } },
-            y: { type: 'linear', position: 'left', grid: { color: '#eef2f7' }, ticks: { color: '#64748b' }, title: { display: true, text: 'Suhu (°C)', color: '#c62828', font: { weight: 600 } } },
-            y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#64748b' }, title: { display: true, text: 'Kelembapan (%)', color: '#0277bd', font: { weight: 600 } } }
+            // suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
+            // garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
+            // seperti lonjakan besar.
+            x: { grid: { color: '#eef2f7' }, ticks: { color: '#64748b', maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 } },
+            y: { type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40, grid: { color: '#eef2f7' }, ticks: { color: '#64748b' }, title: { display: true, text: 'Suhu (°C)', color: '#c62828', font: { weight: 600 } } },
+            y1: { type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100, grid: { drawOnChartArea: false }, ticks: { color: '#64748b' }, title: { display: true, text: 'Kelembapan (%)', color: '#0277bd', font: { weight: 600 } } }
         }
     }
 });
@@ -128,13 +152,14 @@ function buildZoneSelect() {
         sel.appendChild(opt);
     });
     sel.value = currentZone;
+    // Device id pindah ke title: informasinya tetap ada tanpa memakan lebar header.
+    sel.title = 'Perangkat: ' + zoneId() + ' — pilih greenhouse';
     sel.onchange = () => {
         currentZone = parseInt(sel.value, 10) || 0;
         lastData = null;
         optimistic = null;
         fetchDataLogs();
     };
-    document.getElementById('zoneDevice').textContent = zoneId();
     document.getElementById('zoneCount').textContent =
         ZONES.length > 1 ? ZONES.length + ' greenhouse' : '';
 }
@@ -189,14 +214,14 @@ function loadDemoData() {
     const now = Math.floor(Date.now() / 1000);
     const logs = [];
     const base = [
-        [29.1, 62, 38, 1.42, 5.2, "Normal"],
-        [29.8, 58, 33, 1.58, 5.5, "Normal MISTING"],
-        [30.4, 55, 30, 1.72, 5.8, "Normal MISTING"],
-        [30.1, 59, 28, 1.66, 5.6, "Normal BLOWER"],
-        [28.7, 66, 25, 1.35, 5.1, "Normal IRIGASI"],
-        [27.9, 70, 41, 1.18, 4.9, "Normal"],
-        [27.4, 74, 44, 1.04, 4.6, "Normal"],
-        [26.8, 78, 47, 0.88, 4.3, "Normal BLOWER"]
+        [29.1, 62, 38, 1.42, 5.2, 412, "Normal"],
+        [29.8, 58, 33, 1.58, 5.5, 438, "Normal MISTING"],
+        [30.4, 55, 30, 1.72, 5.8, 455, "Normal MISTING"],
+        [30.1, 59, 28, 1.66, 5.6, 470, "Normal BLOWER"],
+        [28.7, 66, 25, 1.35, 5.1, 488, "Normal IRIGASI"],
+        [27.9, 70, 41, 1.18, 4.9, 905, "Normal"],
+        [27.4, 74, 44, 1.04, 4.6, 940, "Normal"],
+        [26.8, 78, 47, 0.88, 4.3, 972, "Normal BLOWER"]
     ];
     base.forEach((b, i) => {
         logs.push({
@@ -206,7 +231,8 @@ function loadDemoData() {
             soil: b[2],
             vpd: b[3],
             et0: b[4],
-            status_sistem: b[5],
+            tds: b[5],
+            status_sistem: b[6],
             manual_mode: false
         });
     });
@@ -214,6 +240,10 @@ function loadDemoData() {
     lastData = logs[logs.length - 1];
     renderLogs(logs);
     updateActuatorStates();
+    updateFreshness(20);
+    document.getElementById('userEmail').textContent = 'demo@smartgreenhouse.local';
+    document.getElementById('userTip').textContent = 'demo@smartgreenhouse.local';
+    document.getElementById('userAvatar').textContent = 'D';
     const badge = document.getElementById('onlineText');
     badge.textContent = 'Demo Mode';
     document.getElementById('onlineBadge').classList.remove('off', 'on');
@@ -221,19 +251,25 @@ function loadDemoData() {
 }
 
 function renderLogs(data) {
-    document.getElementById('mv-temp').textContent = lastData.temperature ?? '-';
-    document.getElementById('mv-hum').textContent = lastData.humidity ?? '-';
-    document.getElementById('mv-vpd').textContent = lastData.vpd ?? '-';
-    document.getElementById('mv-et0').textContent = lastData.et0 ?? '-';
-    document.getElementById('mv-soil').textContent = lastData.soil ?? '-';
+    // Angka sensor dibaca ADC 12-bit lalu jadi float: 1.421642 kPa / 5.4894 mm
+    // tidak pernah berarti apa-apa bagi pengguna. 2 desimal cukup, TANAH/TDS
+    // dibulatkan karena hanya dipakai sebagai persentase/ppm bulat.
+    const f = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '-';
+    document.getElementById('mv-temp').textContent = f(lastData.temperature);
+    document.getElementById('mv-hum').textContent = f(lastData.humidity);
+    document.getElementById('mv-vpd').textContent = f(lastData.vpd);
+    document.getElementById('mv-et0').textContent = f(lastData.et0);
+    document.getElementById('mv-tds').textContent = f(lastData.tds, 0);
+    document.getElementById('mv-soil').textContent = f(saneSoil(lastData.soil), 0);
 
-    sensorChart.data.labels = data.map(fmtLogTime);
+    // Sumbu X: jam saja — label penuh ("11/10/2026, 22.27.15") tidak muat.
+    sensorChart.data.labels = data.map(l => fmtClock(l.ts));
     sensorChart.data.datasets[0].data = data.map(l => l.temperature);
     sensorChart.data.datasets[1].data = data.map(l => l.humidity);
     sensorChart.update();
 
     const tableBody = document.getElementById('logTableBody');
-    tableBody.innerHTML = '';
+    tableBody.innerHTML = '';   // sekaligus menghapus baris "Gagal memuat" dari fetch sebelumnya
     [...data].reverse().forEach(log => {
         const s = log.status_sistem || "";
         let pill = '<span class="pill idle">' + s + '</span>';
@@ -244,14 +280,29 @@ function renderLogs(data) {
         tableBody.innerHTML += `
             <tr>
                 <td>${fmtLogTime(log.ts)}</td>
-                <td class="temp">${log.temperature ?? '-'}</td>
-                <td class="hum">${log.humidity ?? '-'}</td>
-                <td class="soil">${log.soil ?? '-'}</td>
-                <td class="vpd">${log.vpd ?? '-'}</td>
-                <td class="et0">${log.et0 ?? '-'}</td>
+                <td class="temp">${f(log.temperature)}</td>
+                <td class="hum">${f(log.humidity)}</td>
+                <td class="soil">${f(saneSoil(log.soil), 0)}</td>
+                <td class="vpd">${f(log.vpd)}</td>
+                <td class="et0">${f(log.et0)}</td>
+                <td class="tds">${f(log.tds, 0)}</td>
                 <td>${pill}</td>
             </tr>`;
     });
+}
+
+// Soil moisture = 0..100%. Sensor capacitive yang belum terpasang (pin
+// menggantung) dibaca ADC tinggi -> ~100% palsu. Nilai di luar 5..95% tidak
+// ditampilkan sebagai angka.
+function saneSoil(v) {
+    return (typeof v === 'number' && v > 5 && v < 95) ? v : null;
+}
+
+function fmtClock(ts) {
+    if (typeof ts !== 'number' || ts < 100000) return '-';
+    // Detik ikut karena ESP32 push tiap ~20 s: tanpa ini dua titik berdekatan
+    // sering jatuh di menit yang sama dan label sumbu X terulang.
+    return new Date(ts * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function fmtLogTime(ts) {
@@ -294,10 +345,24 @@ async function fetchDataLogs() {
         // ESP32 yang hidup tapi tidak push (padam/offline).
         const age = Math.floor(Date.now() / 1000) - lastData.ts;
         setOnline(true, age);
+        updateFreshness(age);
     } catch (err) {
         console.error("Gagal memuat data:", err.message);
         setOnline(false);
+        const cell = document.getElementById('logEmpty');
+        if (cell) { cell.textContent = "Gagal memuat data (" + err.message + ") — coba Refresh"; cell.classList.add('error'); }
+        document.getElementById('freshness').textContent = '';
     }
+}
+
+// Umur data terakhir di bawah grafik: pengguna bisa membedakan "sensor diam
+// 40 detik" dari "dashboardnya yang macet".
+function updateFreshness(age) {
+    const el = document.getElementById('freshness');
+    if (typeof age !== 'number') { el.textContent = ''; return; }
+    el.textContent = age < 60
+        ? "Data terakhir " + age + " detik lalu"
+        : "Data terakhir " + Math.round(age / 60) + " menit lalu";
 }
 
 function updateActuatorStates() {
