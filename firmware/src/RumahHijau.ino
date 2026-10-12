@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_task_wdt.h>
 #include <freertos/semphr.h>
 #include "config.h"
 #include "sensor.h"
@@ -101,6 +102,17 @@ static void controlTask(void* arg) {
     unsigned long lastFailPrint = 0;
     TickType_t lastWake = xTaskGetTickCount();
 
+    // Fail-safe I2C nyangkut: subscribe controlTask ke Task WDT. Core arduino-esp32
+    // sudah menyalakan CONFIG_ESP_TASK_WDT + PANIC (timeout 5 s), jadi cukup daftar.
+    // readTemperature()/readHumidity() blocking tanpa timeout I2C -> task spin > 5 s ->
+    // panic -> reboot -> initActuators() mematikan pompa yang masih nyala.
+    // Hanya controlTask: netTask sengaja blocking (join WiFi s/d 15 s, TLS) dan
+    // akan memicu reset palsu. Return dicek — fail-safe yang diam-diam gagal
+    //subscribe sama dengan tidak ada (lihat juga xTaskCreatePinnedToCore di setup).
+    if (esp_task_wdt_add(nullptr) != ESP_OK) {
+        Serial.println("[wdt] GAGAL subscribe controlTask - fail-safe I2C tidak aktif");
+    }
+
     for (;;) {
         float soilRaw = analogRead(SOIL_PIN);
         sensorData = readSensors(soilRaw);
@@ -126,6 +138,9 @@ static void controlTask(void* arg) {
             }
             alertActive = nowAlert;
         } else {
+            // Status eksplisit supaya operator/dashboard tahu regulate sudah berhenti
+            // (bukan "Normal" basi dari iterasi valid terakhir).
+            systemStatus = "Sensor Error";
             if (millis() - lastFailPrint > 5000) {
                 lastFailPrint = millis();
                 Serial.println("[!] Sensor SHT31/Soil tidak terhubung - cek wiring");
@@ -135,10 +150,15 @@ static void controlTask(void* arg) {
             }
         }
 
-        bool mist = fuzzyOut.mistOn;
-        bool irigasi = fuzzyOut.irigasiOn;   // keputusan fuzzy; manual via controlApply
-        bool blower = fuzzyOut.blowerOn;
-        float blowerLevel = fuzzyOut.blowerLevel;
+        // Fail-safe: tanpa feedback sensor tidak ada regulate — aktuator dipatikan
+        // semuanya (override manual ikut, karena misting/irigasi tidak punya
+        // timeout sendiri) dan siklus irigasi yang berjalan dihentikan. Tanpa ini
+        // nilai fuzzy terakhir dibekukan selamanya, mis. SHT31 dicabut di tengah
+        // siklus -> misting/irigasi tetap nyala tanpa batas.
+        bool mist = sensorData.valid && fuzzyOut.mistOn;
+        bool irigasi = sensorData.valid && fuzzyOut.irigasiOn;   // fuzzy; manual via controlApply
+        bool blower = sensorData.valid && fuzzyOut.blowerOn;
+        float blowerLevel = sensorData.valid ? fuzzyOut.blowerLevel : 0.0f;
 
         // Override VPD setpoint fase (bila admin sudah men-set target dari dashboard):
         // VPD > target+BAND -> MISTING; VPD < target-BAND -> BLOWER; dalam band -> OFF.
@@ -154,15 +174,15 @@ static void controlTask(void* arg) {
             }
         }
 
-        controlApply(&mist, &irigasi, &blower);
+        if (sensorData.valid) controlApply(&mist, &irigasi, &blower);
         bool manual = controlIsManual();
         // Manual = 100%; auto = level fuzzy/VPD (presisi VPD via PWM).
         float bl = manual ? (blower ? 1.0 : 0.0) : blowerLevel;
         setActuators(mist, blower, bl);
 
-        // Irigasi 4-pompa: manual OFF = batalkan siklus; selain itu serah ke fuzzy
-        // (edge-trigger di irrigationUpdate — cycle sekali per permintaan).
-        if (manual && !irigasi) {
+        // Irigasi 4-pompa: sensor mati ATAU manual OFF = batalkan siklus; selain itu
+        // serah ke fuzzy (edge-trigger di irrigationUpdate — cycle sekali per permintaan).
+        if (!sensorData.valid || (manual && !irigasi)) {
             irrigationAbort();
         } else {
             irrigationUpdate(irigasi, tdsPpm);
@@ -218,6 +238,7 @@ static void controlTask(void* arg) {
         s.phase = phaseGet();
         snapshotPublish(s);
 
+        esp_task_wdt_reset();
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(2000));
     }
 }
