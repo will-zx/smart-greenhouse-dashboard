@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Greenhouse Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=28">
+    <link rel="stylesheet" href="style.css?v=32">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="config.js"></script>
 </head>
-<body class="nav-closed">
+<body>
 
     <!-- Modal login. Tidak pernah tampil otomatis: dashboard terbuka untuk
      siapa pun, login hanya dibutuhkan untuk kontrol & manajemen greenhouse.
@@ -35,37 +35,20 @@
 
     <div id="app" class="hidden">
 
-        <!-- Sidebar -->
-        <aside class="sidebar" id="sidebar">
-            <nav class="nav">
-                <a href="#" class="nav-item active" data-view="beranda">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
-                    Beranda
-                </a>
-                <a href="#" class="nav-item" data-view="kontrol">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>
-                    Kontrol
-                </a>
-                <a href="#" class="nav-item" data-view="log">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18M3 10h18M3 15h18M3 20h10"/><circle cx="19" cy="15" r="1.6"/><circle cx="16" cy="20" r="1.6"/></svg>
-                    Log Sensor
-                </a>
-            </nav>
-        </aside>
-        <div class="nav-backdrop" id="navBackdrop"></div>
-
         <div class="shell">
             <!-- Topbar -->
             <header class="topbar">
-                <button class="burger" id="burger" aria-label="Buka menu" aria-expanded="false">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-                </button>
                 <div class="brand">
                     <span class="brand-icon" aria-hidden="true"></span>
                     <span class="brand-text">SMART<br>GREENHOUSE</span>
                 </div>
-                <h1 class="page-title" id="pageTitle">Beranda</h1>
                 <div class="topbar-actions">
+                    <!-- Satu-satunya navigasi: tombol ini toggle antara Beranda
+                         (data + kontrol) dan Log Sensor. -->
+                    <button class="log-btn" id="logBtn" aria-controls="view-log" aria-expanded="false" title="Log Sensor">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18M3 10h18M3 15h18M3 20h10"/><circle cx="19" cy="15" r="1.6"/><circle cx="16" cy="20" r="1.6"/></svg>
+                        <span id="logBtnLabel">Log Sensor</span>
+                    </button>
                     <!-- Greenhouse aktif + status koneksi digabung dalam satu tombol:
                      klik untuk membuka daftar unit -->
                     <div class="zone-picker">
@@ -113,6 +96,10 @@
 
                 <!-- ============ BERANDA ============ -->
                 <section class="view" id="view-beranda">
+                    <!-- Baris pertama: bacaan sensor (6 metrik) di kiri, kartu
+                         kontrol di sebelahnya. Grafik ada di bawah, penuh lebar.
+                         Di ponsel semuanya jadi satu kolom sesuai urutan ini. -->
+                    <div class="home-top">
                     <div class="metrics">
                         <div class="metric">
                             <div class="label">
@@ -157,80 +144,81 @@
                             <div class="value"><span id="mv-tds">-</span><small> ppm</small></div>
                         </div>
                     </div>
-
-                    <div class="card">
-                        <div class="card-head">
-                            <h2>Grafik Tren Sensor</h2>
-                            <div class="head-actions">
-                                <span class="note" id="freshness"></span>
-                                <span class="note zone-tag"></span>
-                                <button class="refresh" title="Muat ulang data sensor">
-                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
-                                    Refresh
-                                </button>
+                        <div class="card">
+                            <div class="card-head">
+                                <h2>
+                                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                    Kontrol Aktuator
+                                </h2>
+                                <span class="note" id="ctrlNote">Kontrol remot via Firebase RTDB</span>
                             </div>
+                            <div class="ctrl-grid">
+                                <div class="ctrl">
+                                    <div class="ctrl-head">
+                                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a7 7 0 1 1 11.7-7H17a4.5 4.5 0 0 1 2.5 8.2"/><path d="M8 16v1.5M12 16v2M16 16v1.5"/></svg>
+                                        <h3>Misting</h3>
+                                    </div>
+                                    <p class="ctrl-state" id="state-mist">-</p>
+                                    <label class="switch">
+                                        <input type="checkbox" id="sw-mist" onchange="onSwitch('mist', this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="ctrl">
+                                    <div class="ctrl-head">
+                                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z"/><path d="M17 10s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z"/></svg>
+                                        <h3>Irigasi</h3>
+                                    </div>
+                                    <p class="ctrl-state" id="state-irigasi">-</p>
+                                    <label class="switch">
+                                        <input type="checkbox" id="sw-irigasi" onchange="onSwitch('irigasi', this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="ctrl">
+                                    <div class="ctrl-head">
+                                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z"/><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z" transform="rotate(120 12 12)"/><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z" transform="rotate(240 12 12)"/><circle cx="12" cy="12" r="1.8"/></svg>
+                                        <h3>Blower</h3>
+                                    </div>
+                                    <p class="ctrl-state" id="state-blower">-</p>
+                                    <label class="switch">
+                                        <input type="checkbox" id="sw-blower" onchange="onSwitch('blower', this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                <div class="ctrl">
+                                    <div class="ctrl-head">
+                                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></svg>
+                                        <h3>Auto</h3>
+                                    </div>
+                                    <p class="ctrl-state" id="state-auto">-</p>
+                                    <label class="switch">
+                                        <input type="checkbox" id="sw-auto" onchange="onSwitch('auto', this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <!-- Balasan perintah (terkirim / ditolak / gagal) -->
+                            <p class="cmd-status" id="cmdStatus"></p>
                         </div>
-                        <div class="chart-wrap"><canvas id="sensorChart"></canvas></div>
                     </div>
-                </section>
 
-                <!-- ============ KONTROL ============ -->
-                <section class="view hidden" id="view-kontrol">
-                    <div class="card" id="ctrlCard">
-                        <div class="card-head">
-                            <h2>
-                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-                                Kontrol Aktuator
-                            </h2>
-                            <span class="note" id="ctrlNote">Kontrol remot via Firebase RTDB</span>
-                        </div>
-                        <div class="ctrl-grid">
-                            <div class="ctrl">
-                                <div class="ctrl-head">
-                                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a7 7 0 1 1 11.7-7H17a4.5 4.5 0 0 1 2.5 8.2"/><path d="M8 16v1.5M12 16v2M16 16v1.5"/></svg>
-                                    <h3>Misting</h3>
+                        <div class="card">
+                            <div class="card-head">
+                                <h2>Grafik Tren Sensor</h2>
+                                <!-- Hanya nama unit + Refresh di header, dorong ke kanan;
+                                     keterangan "Data terakhir ..." ada di bawah grafik
+                                     supaya tidak menghimpit. -->
+                                <div class="head-actions">
+                                    <span class="note zone-tag"></span>
+                                    <button class="refresh" title="Muat ulang data sensor">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                                        Refresh
+                                    </button>
                                 </div>
-                                <p class="ctrl-state" id="state-mist">-</p>
-                                <label class="switch">
-                                    <input type="checkbox" id="sw-mist" onchange="onSwitch('mist', this.checked)">
-                                    <span class="slider"></span>
-                                </label>
                             </div>
-                            <div class="ctrl">
-                                <div class="ctrl-head">
-                                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z"/><path d="M17 10s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z"/></svg>
-                                    <h3>Irigasi</h3>
-                                </div>
-                                <p class="ctrl-state" id="state-irigasi">-</p>
-                                <label class="switch">
-                                    <input type="checkbox" id="sw-irigasi" onchange="onSwitch('irigasi', this.checked)">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div class="ctrl">
-                                <div class="ctrl-head">
-                                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z"/><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z" transform="rotate(120 12 12)"/><path d="M12 12C9.2 10.4 9.2 6 12 3.2c2.8 2.8 2.8 7.2 0 8.8z" transform="rotate(240 12 12)"/><circle cx="12" cy="12" r="1.8"/></svg>
-                                    <h3>Blower</h3>
-                                </div>
-                                <p class="ctrl-state" id="state-blower">-</p>
-                                <label class="switch">
-                                    <input type="checkbox" id="sw-blower" onchange="onSwitch('blower', this.checked)">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div class="ctrl">
-                                <div class="ctrl-head">
-                                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></svg>
-                                    <h3>Auto</h3>
-                                </div>
-                                <p class="ctrl-state" id="state-auto">-</p>
-                                <label class="switch">
-                                    <input type="checkbox" id="sw-auto" onchange="onSwitch('auto', this.checked)">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <p class="cmd-status" id="cmdStatus"></p>
+                            <div class="chart-wrap"><canvas id="sensorChart"></canvas></div>
+                            <p class="chart-foot" id="freshness"></p>
                     </div>
                 </section>
 
@@ -288,7 +276,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=22"></script>
+    <script src="app.js?v=24"></script>
 
     <!--
       SETUP WAJIB:

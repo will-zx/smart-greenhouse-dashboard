@@ -17,7 +17,6 @@
     --danger: #dc2626;
     --danger-soft: #fef2f2;
     --track: #bbdefb;      /* switch mati */
-    --sidebar: 248px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -28,20 +27,8 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* ============ SIDEBAR ============ */
-.sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    width: var(--sidebar);
-    background: var(--card);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    z-index: 30;
-    transition: transform 0.22s ease;
-}
-/* Brand: identitas aplikasi, terpisah dari burger (menu) dan judul halaman
-   supaya tidak terlihat "| menu" di sisi yang salah. */
+/* Brand: identitas aplikasi, terpisah dari judul halaman supaya tidak terlihat
+   "| menu" di sisi yang salah. */
 .brand {
     display: flex;
     align-items: center;
@@ -71,41 +58,9 @@ body {
     line-height: 1.15;
     color: #fff;
 }
-.nav { padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; }
-.nav-item {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border-left: 3px solid transparent;
-    color: var(--muted);
-    font-size: 13.5px;
-    font-weight: 500;
-    text-decoration: none;
-    transition: background 0.15s, color 0.15s;
-}
-.nav-item:hover { background: var(--card-2); color: var(--text); }
-.nav-item.active {
-    background: var(--accent-soft);
-    border-left-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
-}
-.nav-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(15,23,42,.45);
-    z-index: 25;
-    display: none;
-}
 
 /* ============ SHELL ============ */
-.shell { margin-left: var(--sidebar); min-height: 100vh; display: flex; flex-direction: column; transition: margin-left .22s ease; }
-/* Burger berfungsi di desktop juga: menyembunyikan sidebar alih-alih membuka
-   drawer, sehingga konten melebar penuh. */
-body.nav-closed .sidebar { transform: translateX(-100%); }
-body.nav-closed .shell { margin-left: 0; }
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar {
     position: sticky;
     top: 0;
@@ -119,17 +74,19 @@ body.nav-closed .shell { margin-left: 0; }
     gap: 14px;
     box-shadow: 0 1px 3px rgba(0,0,0,.15);
 }
-.burger {
-    display: block;
-    background: none;
-    border: none;
-    color: rgba(255,255,255,.85);
-    cursor: pointer;
-    padding: 4px;
-    line-height: 1;
-    flex-shrink: 0;
+/* Navigasi satu-satunya: tombol Log Sensor di topbar. Terlihat aktif (terbalik)
+   ketika sedang membuka Log, jadi isinya sendiri yang jadi tombol "kembali". */
+.log-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.22);
+    border-radius: 999px;
+    padding: 6px 12px;
+    color: #fff; font-family: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer; white-space: nowrap;
 }
-.page-title { font-size: 17px; font-weight: 600; letter-spacing: .2px; color: #fff; }
+.log-btn:hover { background: rgba(255,255,255,.24); }
+.log-btn[aria-expanded="true"] { background: #fff; color: var(--accent-dark); }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 
 /* Pilih greenhouse: tombol tunggal; daftar unit muncul di popup di bawahnya. */
@@ -212,7 +169,9 @@ body.nav-closed .shell { margin-left: 0; }
 @media (hover: none) { .z-edit { opacity: 1; } }
 .zone-menu-hint { font-size: 11px; color: var(--muted); padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 6px; }
 
-.head-actions { display: flex; align-items: center; gap: 12px; }
+/* margin-left:auto tetap 담당 kalau .head-actions sempat wrap ke baris
+   sendiri di layar sempit — tetap di ujung kanan, bukan jatuh ke kiri. */
+.head-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .zone-tag {
     padding: 4px 10px;
     border-radius: 999px;
@@ -337,15 +296,27 @@ body.nav-closed .shell { margin-left: 0; }
 .chart-wrap { position: relative; height: 320px; }
 
 /* ============ KONTROL ============ */
-/* Kartu hugs konten: tanpa batas lebar, area kanan kartu kosong besar karena
-   barisnya hanya ~620px.Lebar 680px = snug dengan isi, dan di mode hanya-lihat
-   (sakelar disembunyikan) ruang kosongnya makin tak terlihat. */
-#ctrlCard { max-width: 680px; }
+/* Baris pertama Beranda: 6 metrik di kiri, kartu kontrol di sebelahnya.
+   Kartu grafik ada di bawahnya, penuh lebar. Di ponsel grid ini jadi satu
+   kolom dan urutan DOM sudah benar: metrik → kontrol → grafik. */
+.home-top { display: grid; gap: 20px; grid-template-columns: 1fr; margin-bottom: 20px; }
+.home-top .metrics { margin-bottom: 0; }   /* gap grid yang mengatur jarak */
+.home-top > .card { margin-bottom: 0; }
+@media (min-width: 900px) {
+    /* align-items sengaja tidak `start`: kedua kolom diregangkan ke tinggi yang
+       sama supaya pinggiran bawahnya rata. */
+    /* Kolom kontrol proporsional (bukan 1fr tetap) supaya tile metrik tidak
+       terlalu lebar di jendela besar. */
+    .home-top { grid-template-columns: minmax(0, 1fr) minmax(300px, 46%); }
+    /* 2 kolom eksplisit, bukan auto-fit: di kolom selebar ini auto-fit jadi
+       4+2 (atau 5+1) yang terlihat tidak rapi. 6 metrik = 2 kolom x 3 baris. */
+    .home-top .metrics { grid-template-columns: repeat(2, 1fr); }
+}
 /* Satu aktuator per baris: nama di kiri, status + sakelar di kanan. Padat dan
    enak dipindai dibandingkan kartu yang menumpuk nama/status/sakelar. */
-.ctrl-grid { display: flex; flex-direction: column; gap: 8px; max-width: 620px; }
+.ctrl-grid { display: flex; flex-direction: column; gap: 8px; }
 .ctrl {
-    background: var(--card);
+    background: var(--card-2);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 10px 14px;
@@ -356,7 +327,7 @@ body.nav-closed .shell { margin-left: 0; }
 .ctrl-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ctrl-head h3 { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
 .ctrl-head svg { color: var(--accent); flex-shrink: 0; }
-/* Status: OFF merah / ON hijau, tetap di tengah baris */
+/* Status: OFF merah / ON hijau */
 .ctrl-state {
     margin-left: auto;
     font-size: 13px;
@@ -370,7 +341,7 @@ body.nav-closed .shell { margin-left: 0; }
 .ctrl-state.on { color: var(--ok); }
 /* Mode hanya-lihat (tamu): status ON/OFF tetap tampil, sakelarnya disembunyikan
    supaya tidak ada kontrol yang bisa diklik tanpa hak akses. */
-.card.read-only .switch { display: none; }
+body.read-only .switch { display: none; }
 .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider { position: absolute; inset: 0; background: var(--track); border-radius: 999px; transition: background .2s; cursor: pointer; }
@@ -384,7 +355,7 @@ body.nav-closed .shell { margin-left: 0; }
 /* Switch hidup memakai warna header, bukan hijau, agar satu warna aksen. */
 .switch input:checked + .slider { background: var(--accent-dark); }
 .switch input:checked + .slider::before { transform: translateX(18px); }
-.cmd-status { text-align: center; font-size: 12px; color: var(--muted); margin-top: 14px; min-height: 16px; }
+.cmd-status { text-align: center; font-size: 12px; color: var(--accent-dark); font-weight: 600; margin-top: 14px; min-height: 16px; }
 
 /* ============ TABEL ============ */
 .table-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -418,6 +389,8 @@ tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-spa
 tbody tr:hover { background: var(--accent-soft); }
 tbody td.num { color: var(--text); font-weight: 600; }
 .table-foot { font-size: 12px; color: var(--muted); margin-top: 12px; min-height: 16px; }
+/* Keterangan umur data di bawah grafik, bukan di header kartu. */
+.chart-foot { font-size: 12px; color: var(--muted); margin-top: 12px; }
 .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 /* Status aktuator dibedakan oleh isi teksnya (MISTING/BLOWER/IRIGASI), bukan
    warna — semua status aktif memakai satu aksen agar tampilan tetap satu warna. */
@@ -480,15 +453,10 @@ tbody td.num { color: var(--text); font-weight: 600; }
 
 /* ============ RESPONSIF ============ */
 @media (max-width: 900px) {
-    .sidebar { transform: translateX(-100%); box-shadow: 0 0 24px rgba(0,0,0,.12); }
-    body.nav-open .sidebar { transform: translateX(0); }
-    body.nav-open .nav-backdrop { display: block; }
-    .shell { margin-left: 0; }
     .content { padding: 16px 14px 32px; }
 }
 @media (max-width: 700px) {
     .topbar { padding: 0 14px; height: 58px; gap: 10px; }
-    .page-title { font-size: 15px; }
     .user-id { display: none; }
     .topbar-actions { gap: 8px; }
     /* Pemilih greenhouse TETAP ada di handphone (dulu disembunyikan, akibatnya
@@ -497,6 +465,10 @@ tbody td.num { color: var(--text); font-weight: 600; }
        sudah tertulis di badge koneksi dan di header kartu. */
     .zone-btn-icon { display: block; }
     .zone-btn { padding: 6px 10px; }
+    /* Topbar sempit: tombol Log Sensor jadi ikon saja, supaya brand, unit, dan
+       avatar tetap muat di 360px. */
+    .log-btn span { display: none; }
+    .log-btn { padding: 6px 10px; }
     /* Di layar sempit nama unit disembunyikan, TAPI statusnya tetap tampil —
       =status inilah yang paling berguna, dan tanpa teks warna ikon saja
        tidak terbaca. */
@@ -522,6 +494,9 @@ tbody td.num { color: var(--text); font-weight: 600; }
     .metric .value { font-size: 21px; }
     .metric .value small { font-size: 11px; }
     .card-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+    /* Kartu grafik tidak ikut menumpuk: judul dan (unit + Refresh) tetap
+       satu baris di layar ponsel. */
+    #view-beranda .card-head { flex-direction: row; align-items: center; }
     .user-menu { min-width: 200px; }
     table { font-size: 12px; }
     tbody td, thead th { padding: 9px 10px; }

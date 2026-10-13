@@ -9,23 +9,24 @@ Realtime Database.
 
 ![Dashboard](docs/dashboard.png)
 
-Layout admin: sidebar kiri (Beranda, Kontrol, Log Sensor) dan topbar biru solid.
-Tombol hamburger menyembunyikan/munculkan sidebar di desktop, dan menjadi
-drawer di layar kecil. Greenhouse yang dipantau/dikontrol dipilih lewat tombol
-di topbar — tombol itu sekaligus menampilkan **status** unit tersebut
-(hijau = online, kuning = data basi, merah = offline). Seluruh tampilan
-mengikuti satu skema warna (Material Blue berpusat di `#1565C0`) yang
-didefinisikan di `style.css`; grafik membaca variabel warna yang sama.
+Layout: satu topbar biru solid, tanpa sidebar. Greenhouse yang dipantau dan
+dikontrol dipilih lewat tombol di topbar — tombol itu sekaligus menampilkan
+**status** unit tersebut (hijau = online, kuning = data basi, merah = offline).
+Navigasi cukup satu tombol **Log Sensor**: klik membuka histori, klik lagi
+kembali ke Beranda. Seluruh tampilan mengikuti satu skema warna (Material Blue
+berpusat di `#1565C0`) yang didefinisikan di `style.css`; grafik membaca
+variabel warna yang sama.
 
 **Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
-tanah, VPD, ET0, dan TDS) plus grafik tren 20 titik terakhir, diiringi nama
-greenhouse yang sedang dipantau dan tombol Refresh.
+tanah, VPD, ET0, dan TDS) dalam dua kolom × tiga baris. Pada monitor lebar
+(≥ 900 px) kartu **Kontrol Aktuator** berdiri tepat di sebelahnya, sedangkan
+kartu **Grafik Tren Sensor** (20 titik terakhir, nama greenhouse yang dipantau,
+tombol Refresh) membentang penuh di bawah keduanya. Di ponsel semuanya menjadi
+satu kolom: metrik → kontrol → grafik.
 
-**Kontrol** menampilkan satu baris per aktuator (Misting, Irigasi, Blower,
-Auto) lengkap dengan status ON/OFF. Kartu ini terlihat untuk semua orang, tapi
+Kartu kontrol memuat satu baris per aktuator (Misting, Irigasi, Blower, Auto)
+dengan status ON/OFF dan sakelarnya. Kartu ini terlihat untuk semua orang, tapi
 **sakelarnya hanya muncul setelah login admin**.
-
-![Kontrol](docs/kontrol.png)
 
 **Log Sensor** menampilkan histori dalam tabel, lengkap dengan pilihan jumlah
 baris (10/20/50) dan pencarian. Tampilan menyesuaikan lebar layar, dari ponsel
@@ -49,8 +50,8 @@ manual atau mengelola greenhouse, klik avatar **Tamu** → **Login**.
 
 Cukup dua jenis akun: **admin** dan **ESP32**. Tulis (kontrol & label) dijaga
 RTDB rules lewat allowlist UID; pembacaan dibuka publik karena isinya hanya
-telemetri. Detail & cara menempelkan rules ada di
-[`web/TUTORIAL.md`](web/TUTORIAL.md).
+telemetri. Detail & cara menempelkan rules ada di dokumen internal tim yang
+tidak disertakan di repo ini.
 
 Sesi admin disimpan di browser (`persistence: local`), jadi admin tetap login
 otomatis sampai menekan **Keluar**. Tamu di perangkat lain tidak terpengaruh.
@@ -113,8 +114,9 @@ satu-satunya penghubung antara perangkat dan peramban.
 suhu, kelembapan, tanah, VPD, dan ETc. Aturan disimpan sebagai tabel di
 `fuzzy.cpp`; level 0 berarti "off" dan hanya menurunkan bobot.
 
-**VPD dan ETc.** VPD dihitung dengan rumus Tetens di `vpd.cpp`. ETc memakai
-metode Blaney-Criddle dengan Kc cabai 0.75 di `irrigation.cpp`.
+**VPD dan ETc.** VPD dihitung dengan rumus Tetens (`calcVpd` di
+`RumahHijau.ino`). ETc memakai metode Blaney-Criddle dengan Kc cabai 0.75 di
+`irrigation.cpp`.
 
 **Siklus irigasi.** Berjalan tiga fase: FILL mengisi ember campuran, FERT
 menyalakan kedua pompa pemupuk dalam pola denyut 2 detik dan jeda 1 detik
@@ -132,8 +134,7 @@ perintah. I/O jaringan yang blocking tidak pernah menahan jalur aktuator.
 ## Struktur
 
 ```text
-firmware/src/     Firmware utama, 27 file
-firmware_old/     Arsip pra-FreeRTOS, tidak lagi dipakai
+firmware/src/     Firmware utama
 web/              Dashboard statis: index.html, app.js, config.js, style.css
 ```
 

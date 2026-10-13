@@ -7,14 +7,18 @@ let logData = [];         // log terakhir yang sudah difilter (untuk render tabe
 let logFilter = '';       // teks pencarian log
 let logLimit = 20;        // berapa baris yang diambil dari RTDB (dropdown "Show N entries")
 
+// Angka sensor dibaca ADC 12-bit lalu jadi float: 1.421642 kPa / 5.4894 mm tidak
+// pernah berarti apa-apa bagi pengguna. 2 desimal cukup, TANAH/TDS dibulatkan
+// karena hanya dipakai sebagai persentase/ppm bulat.
+const fmtNum = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '-';
+
 // Dashboard terbuka untuk semua orang: data sensor dibaca tanpa login, dan
 // hanya kontrol aktuator / ganti nama greenhouse yang butuh akun admin.
 // Tamu -> klik avatar -> popup akun -> item "Login".
 document.addEventListener('DOMContentLoaded', () => {
-    const app = document.getElementById('app');
     const login = document.getElementById('login');
     login.hidden = true;
-    app.classList.remove('hidden');
+    document.getElementById('app').classList.remove('hidden');
 
     // config.js menyediakan firebaseConfig, DB_URL, ZONES, ADMIN_EMAIL.
     // Persistence default = local: sesi admin tersimpan di browser.
@@ -41,19 +45,79 @@ document.addEventListener('DOMContentLoaded', () => {
             err.textContent = e2.message;
         }
     });
-});
 
-// Menutup modal login: terdaftar terpisah dari blok di atas supaya tetap
-// bekerja di mode demo (yang keluar lebih awal) maupun saat modal dibuka dari
-// popup akun.
-document.addEventListener('DOMContentLoaded', () => {
-    const login = document.getElementById('login');
+    // Menutup modal login: tombol, klik overlay, atau Escape.
     document.getElementById('loginClose').addEventListener('click', () => {
         login.hidden = true;
         document.getElementById('loginError').textContent = '';
     });
     login.addEventListener('click', e => { if (e.target === login) login.hidden = true; });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') login.hidden = true; });
+
+    // Popup akun: Tamu melihat item "Login", admin melihat "Keluar".
+    const chip = document.getElementById('userChip');
+    const menu = document.getElementById('userMenu');
+    chip.addEventListener('click', e => {
+        const open = menu.hidden;
+        menu.hidden = !open;
+        chip.setAttribute('aria-expanded', String(open));
+        e.stopPropagation();
+    });
+    document.getElementById('loginItem').addEventListener('click', () => {
+        menu.hidden = true;
+        chip.setAttribute('aria-expanded', 'false');
+        document.getElementById('login').hidden = false;
+        document.getElementById('loginEmail').focus();
+    });
+    document.addEventListener('click', () => {
+        menu.hidden = true;
+        chip.setAttribute('aria-expanded', 'false');
+        closeZoneMenu();
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { login.hidden = true; menu.hidden = true; closeZoneMenu(); }
+    });
+
+    // Navigasi: 2 view (Beranda / Log Sensor) tanpa router. Satu tombol di
+    // topbar toggle antara keduanya; labelnya ikut berubah.
+    document.getElementById('logBtn').addEventListener('click', () => {
+        switchView(currentView === 'log' ? 'beranda' : 'log');
+    });
+
+    // Greenhouse aktif + daftar unit.
+    document.getElementById('zoneBtn').addEventListener('click', e => {
+        e.stopPropagation();
+        const m = document.getElementById('zoneMenu');
+        if (m.hidden) openZoneMenu(); else closeZoneMenu();
+    });
+    // Klik di luar popup menutupnya (listener global "click" di atas).
+    document.getElementById('zoneMenu').addEventListener('click', e => e.stopPropagation());
+
+    // Ikon Refresh berputar selama pemuatan, di kedua halaman (Beranda & Log).
+    // Dipanggil lewat listener (bukan onclick inline) supaya kita tahu kapan
+    // fetch selesai.
+    document.querySelectorAll('.refresh').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            btn.classList.add('spinning');
+            const t0 = Date.now();
+            try {
+                await fetchDataLogs();
+            } finally {
+                // Putar minimal ~0.5 s supaya perputarannya terlihat, walau
+                // fetch selesai secepatnya.
+                setTimeout(() => btn.classList.remove('spinning'), Math.max(0, 500 - (Date.now() - t0)));
+            }
+        });
+    });
+
+    // Search + "Show N entries" hanya relevan di halaman Log.
+    document.getElementById('logSearch').addEventListener('input', e => {
+        logFilter = e.target.value.trim().toLowerCase();
+        renderLogTable();
+    });
+    document.getElementById('showEntries').addEventListener('change', e => {
+        logLimit = parseInt(e.target.value, 10) || 20;
+        fetchDataLogs();   // jumlah baris berubah -> ambil ulang dari RTDB
+    });
 });
 
 // Ikon incognito untuk tamu (topi + kacamata), Login/keluar tidak bergantian.
@@ -62,9 +126,9 @@ const INCOGNITO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 // Menentukan tampilan identitas di topbar & popup akun.
 // user = null  -> Tamu (ikon incognito, tanpa kontrol)
 // user != null -> Admin (kalau emailnya cocok) atau User (hanya lihat)
-function setIdentity(user, forceAdmin = false) {
+function setIdentity(user) {
     const email = user && user.email ? user.email : null;
-    const admin = forceAdmin || (!!email && email === ADMIN_EMAIL);
+    const admin = !!email && email === ADMIN_EMAIL;
     isAdmin = admin;
 
     const avatar = document.getElementById('userAvatar');
@@ -99,109 +163,25 @@ function setIdentity(user, forceAdmin = false) {
 // untuk dipantau), tetapi sakelarnya disembunyikan bila belum login admin.
 // Ikon pensil di popup greenhouse tetap khusus admin.
 function applyRoleView() {
-    const card = document.getElementById('ctrlCard');
-    card.classList.toggle('read-only', !isAdmin);
+    document.body.classList.toggle('read-only', !isAdmin);
     document.getElementById('ctrlNote').textContent =
         isAdmin ? 'Kontrol remot via Firebase RTDB' : 'Hanya lihat — login untuk kontrol manual';
 }
 
-// Popup akun: Tamu melihat item "Login", admin melihat "Keluar".
-document.addEventListener('DOMContentLoaded', () => {
-    const chip = document.getElementById('userChip');
-    const menu = document.getElementById('userMenu');
-    chip.addEventListener('click', e => {
-        const open = menu.hidden;
-        menu.hidden = !open;
-        chip.setAttribute('aria-expanded', String(open));
-        e.stopPropagation();
-    });
-    document.getElementById('loginItem').addEventListener('click', () => {
-        menu.hidden = true;
-        chip.setAttribute('aria-expanded', 'false');
-        document.getElementById('login').hidden = false;
-        document.getElementById('loginEmail').focus();
-    });
-    document.addEventListener('click', () => {
-        menu.hidden = true;
-        chip.setAttribute('aria-expanded', 'false');
-        closeZoneMenu();
-    });
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') { menu.hidden = true; closeZoneMenu(); }
-    });
-});
-
-// Navigasi sidebar: 3 view (Beranda / Kontrol / Log Sensor) tanpa router —
-// cukup tampilkan satu section dan geser penanda aktif. Sidebar jadi drawer
-// off-canvas di layar kecil, dibuka lewat tombol hamburger.
-const VIEW_TITLES = { beranda: 'Beranda', kontrol: 'Kontrol', log: 'Log Sensor' };
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', e => {
-            e.preventDefault();
-            switchView(item.dataset.view);
-            closeNav();
-        });
-    });
-
-    const burger = document.getElementById('burger');
-    burger.addEventListener('click', toggleNav);
-    document.getElementById('navBackdrop').addEventListener('click', closeNav);
-
-    // Ikon Refresh berputar selama pemuatan, di kedua halaman (Beranda & Log).
-    // Dipanggil lewat listener (bukan onclick inline) supaya kita tahu kapan
-    // fetch selesai.
-    document.querySelectorAll('.refresh').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            btn.classList.add('spinning');
-            const t0 = Date.now();
-            try {
-                await fetchDataLogs();
-            } finally {
-                // Putar minimal ~0.5 s supaya perputarannya terlihat, walau
-                // fetch selesai secepatnya.
-                setTimeout(() => btn.classList.remove('spinning'), Math.max(0, 500 - (Date.now() - t0)));
-            }
-        });
-    });
-
-    // Search + "Show N entries" hanya relevan di halaman Log.
-    document.getElementById('logSearch').addEventListener('input', e => {
-        logFilter = e.target.value.trim().toLowerCase();
-        renderLogTable();
-    });
-    document.getElementById('showEntries').addEventListener('change', e => {
-        logLimit = parseInt(e.target.value, 10) || 20;
-        fetchDataLogs();   // jumlah baris berubah -> ambil ulang dari RTDB
-    });
-});
+// Navigasi: cukup tampilkan satu section. Tombol Log Sensor jadi tombol
+// "kembali" ketika Log sedang terbuka.
+const VIEW_TITLES = { beranda: 'Beranda', log: 'Log Sensor' };
+let currentView = 'beranda';
 
 function switchView(name) {
+    currentView = name;
     Object.keys(VIEW_TITLES).forEach(v => {
         document.getElementById('view-' + v).classList.toggle('hidden', v !== name);
     });
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.view === name);
-    });
-    document.getElementById('pageTitle').textContent = VIEW_TITLES[name] || 'Beranda';
-}
-
-const isNarrow = () => window.matchMedia('(max-width: 900px)').matches;
-
-// Satu tombol, dua perilaku mengikuti lebar layar: di desktop sidebar
-// disembunyikan (nav-closed, konten melebar), di layar kecil sidebar jadi
-// drawer yang muncul lewat nav-open + backdrop.
-function toggleNav() {
-    const open = isNarrow()
-        ? document.body.classList.toggle('nav-open')
-        : document.body.classList.toggle('nav-closed');
-    document.getElementById('burger').setAttribute('aria-expanded', String(open));
-}
-
-function closeNav() {
-    if (!isNarrow()) return;      // di desktop pilihan menu tidak menutup sidebar
-    document.body.classList.remove('nav-open');
-    document.getElementById('burger').setAttribute('aria-expanded', 'false');
+    const btn = document.getElementById('logBtn');
+    btn.setAttribute('aria-expanded', String(name === 'log'));
+    document.getElementById('logBtnLabel').textContent =
+        name === 'log' ? 'Beranda' : 'Log Sensor';
 }
 
 function signOut() {
@@ -322,16 +302,6 @@ function closeZoneMenu() {
     document.getElementById('zoneBtn').setAttribute('aria-expanded', 'false');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('zoneBtn').addEventListener('click', e => {
-        e.stopPropagation();
-        const m = document.getElementById('zoneMenu');
-        if (m.hidden) openZoneMenu(); else closeZoneMenu();
-    });
-    // Klik di luar popup menutupnya (sudah ditangani listener global di bawah).
-    document.getElementById('zoneMenu').addEventListener('click', e => e.stopPropagation());
-});
-
 // Pembacaan data_sensor boleh tanpa login (RTDB rules .read: true), jadi
 // token hanya ditambahkan bila sudah login. Penulisan (commands/labels)
 // tetap memakai token dan hanya admin yang diizinkan rules.
@@ -388,7 +358,9 @@ function saveRename(i, val) {
         else {
             labels[id] = val;
             showZoneMsg("Nama greenhouse disimpan", true);
-            if (i === currentZone) setOnlineText();
+            if (i === currentZone) setOnline(
+                !document.getElementById('zoneBtn').classList.contains('is-off'),
+                Math.floor(Date.now() / 1000) - (lastData ? lastData.ts : 0));
         }
         buildZoneSelect();
     });
@@ -402,13 +374,6 @@ function showZoneMsg(text, ok = false) {
     el.hidden = false;
     clearTimeout(showZoneMsg.timer);
     showZoneMsg.timer = setTimeout(() => el.hidden = true, 3000);
-}
-
-// Nama unit ikut tampil di tombol gabungan, jadi segarkan setelah nama
-// berubah (ganti nama atau ganti unit).
-function setOnlineText() {
-    setOnline(!document.getElementById('zoneBtn').classList.contains('is-off'),
-        Math.floor(Date.now() / 1000) - (lastData ? lastData.ts : 0));
 }
 
 async function sendLabel(value, id) {
@@ -429,16 +394,12 @@ async function sendLabel(value, id) {
 }
 
 function renderLogs(data) {
-    // Angka sensor dibaca ADC 12-bit lalu jadi float: 1.421642 kPa / 5.4894 mm
-    // tidak pernah berarti apa-apa bagi pengguna. 2 desimal cukup, TANAH/TDS
-    // dibulatkan karena hanya dipakai sebagai persentase/ppm bulat.
-    const f = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '-';
-    document.getElementById('mv-temp').textContent = f(lastData.temperature);
-    document.getElementById('mv-hum').textContent = f(lastData.humidity);
-    document.getElementById('mv-vpd').textContent = f(lastData.vpd);
-    document.getElementById('mv-et0').textContent = f(lastData.et0);
-    document.getElementById('mv-tds').textContent = f(lastData.tds, 0);
-    document.getElementById('mv-soil').textContent = f(saneSoil(lastData.soil), 0);
+    document.getElementById('mv-temp').textContent = fmtNum(lastData.temperature);
+    document.getElementById('mv-hum').textContent = fmtNum(lastData.humidity);
+    document.getElementById('mv-vpd').textContent = fmtNum(lastData.vpd);
+    document.getElementById('mv-et0').textContent = fmtNum(lastData.et0);
+    document.getElementById('mv-tds').textContent = fmtNum(lastData.tds, 0);
+    document.getElementById('mv-soil').textContent = fmtNum(saneSoil(lastData.soil), 0);
 
     // Sumbu X: jam saja — label penuh ("11/10/2026, 22.27.15") tidak muat.
     sensorChart.data.labels = data.map(l => fmtClock(l.ts));
@@ -453,7 +414,6 @@ function renderLogs(data) {
 // Tabel log di-filter client-side: baris yang sudah termuat (10/20/50,
 // tergantung dropdown "Show N entries") tidak perlu fetch ulang saat mengetik.
 function renderLogTable() {
-    const f = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '-';
     const rows = logFilter
         ? logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.status_sistem || '')).toLowerCase().includes(logFilter))
         : logData;
@@ -475,12 +435,12 @@ function renderLogTable() {
         tableBody.innerHTML += `
             <tr>
                 <td>${fmtLogTime(log.ts)}</td>
-                <td class="num">${f(log.temperature)}</td>
-                <td class="num">${f(log.humidity)}</td>
-                <td class="num">${f(saneSoil(log.soil), 0)}</td>
-                <td class="num">${f(log.vpd)}</td>
-                <td class="num">${f(log.et0)}</td>
-                <td class="num">${f(log.tds, 0)}</td>
+                <td class="num">${fmtNum(log.temperature)}</td>
+                <td class="num">${fmtNum(log.humidity)}</td>
+                <td class="num">${fmtNum(saneSoil(log.soil), 0)}</td>
+                <td class="num">${fmtNum(log.vpd)}</td>
+                <td class="num">${fmtNum(log.et0)}</td>
+                <td class="num">${fmtNum(log.tds, 0)}</td>
                 <td>${pill}</td>
             </tr>`;
     });
