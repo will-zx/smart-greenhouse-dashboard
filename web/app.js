@@ -479,9 +479,8 @@ function loadDemoData() {
     renderLogs(logs);
     updateActuatorStates();
     updateFreshness(20);
-    document.getElementById('userEmail').textContent = 'demo@smartgreenhouse.local';
-    document.getElementById('userAvatar').textContent = 'D';
-    document.getElementById('userName').textContent = 'demo';
+    // Identitas (avatar/nama/peran) sudah diatur oleh setIdentity() di atas —
+    // jangan ditimpa di sini, supaya demo konsisten dengan keadaan nyata.
     const btn = document.getElementById('zoneBtn');
     btn.classList.remove('is-off', 'is-ok', 'is-stale');
     btn.classList.add('is-demo');

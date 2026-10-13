@@ -12,31 +12,18 @@ Realtime Database.
 Layout admin: sidebar kiri (Beranda, Kontrol, Log Sensor) dan topbar biru solid.
 Tombol hamburger menyembunyikan/munculkan sidebar di desktop, dan menjadi
 drawer di layar kecil. Greenhouse yang dipantau/dikontrol dipilih lewat tombol
-di topbar yang memunculkan daftar unit. Seluruh tampilan mengikuti satu skema
-warna (Material Blue berpusat di `#1565C0`) yang didefinisikan di `style.css`;
-grafik membaca variabel warna yang sama.
+di topbar — tombol itu sekaligus menampilkan **status** unit tersebut
+(hijau = online, kuning = data basi, merah = offline). Seluruh tampilan
+mengikuti satu skema warna (Material Blue berpusat di `#1565C0`) yang
+didefinisikan di `style.css`; grafik membaca variabel warna yang sama.
 
 **Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
-tanah, VPD, ET0, dan TDS) plus grafik tren 20 titik terakhir.
+tanah, VPD, ET0, dan TDS) plus grafik tren 20 titik terakhir, diiringi nama
+greenhouse yang sedang dipantau dan tombol Refresh.
 
 **Kontrol** menampilkan satu baris per aktuator (Misting, Irigasi, Blower,
-Auto) dengan status ON/OFF dan sakelarnya, hanya untuk admin.
-
-## Akses
-
-Dashboard **terbuka untuk semua orang**: siapa pun bisa membuka halaman dan
-melihat data sensor tanpa login, dan tampil sebagai **Tamu**. Untuk
-kendali manual atau mengelola greenhouse, klik avatar **Tamu** → **Login**.
-
-| Peran | Akun | Boleh |
-|---|---|---|
-| Tamu | tanpa akun | baca semua metrik, grafik, dan log |
-| Admin | `mr.pman@mail.unnes.ac.id` | + kontrol aktuator & ganti nama greenhouse |
-| Perangkat | satu akun per ESP32 | push sensor, terima perintah |
-
-Cukup dua jenis akun: **admin** dan **ESP32**. Penulisan dijaga RTDB rules
-(allowlist UID); pembacaan dibuka publik. Detail & cara menempelkan rules ada di
-[`web/TUTORIAL.md`](web/TUTORIAL.md).
+Auto) lengkap dengan status ON/OFF. Kartu ini terlihat untuk semua orang, tapi
+**sakelarnya hanya muncul setelah login admin**.
 
 ![Kontrol](docs/kontrol.png)
 
@@ -47,6 +34,26 @@ sampai monitor lebar.
 Menambah unit greenhouse = tambah baris di `ZONES` (`web/config.js`) dengan
 `id` yang sama dengan `DEVICE_ID` firmware, plus tambahkan UID perangkat itu ke
 allowlist rules RTDB.
+
+## Akses
+
+Dashboard **terbuka untuk semua orang**: siapa pun bisa membuka halaman dan
+melihat data sensor tanpa login, dan tampil sebagai **Tamu**. Untuk kendali
+manual atau mengelola greenhouse, klik avatar **Tamu** → **Login**.
+
+| Peran | Akun | Boleh |
+|---|---|---|
+| Tamu | tanpa akun | baca metrik, grafik, log, dan status aktuator |
+| Admin | `mr.pman@mail.unnes.ac.id` | + sakelar kontrol aktuator & ganti nama greenhouse |
+| Perangkat | satu akun per ESP32 | push sensor, terima perintah |
+
+Cukup dua jenis akun: **admin** dan **ESP32**. Tulis (kontrol & label) dijaga
+RTDB rules lewat allowlist UID; pembacaan dibuka publik karena isinya hanya
+telemetri. Detail & cara menempelkan rules ada di
+[`web/TUTORIAL.md`](web/TUTORIAL.md).
+
+Sesi admin disimpan di browser (`persistence: local`), jadi admin tetap login
+otomatis sampai menekan **Keluar**. Tamu di perangkat lain tidak terpengaruh.
 
 ## Hardware
 
@@ -97,7 +104,7 @@ suhu, kelembapan, tanah, VPD, dan ETc. Aturan disimpan sebagai tabel di
 metode Blaney-Criddle dengan Kc cabai 0.75 di `irrigation.cpp`.
 
 **Siklus irigasi.** Berjalan tiga fase: FILL mengisi ember campuran, FERT
-menyalakan kedua pompa fertilized dalam pola denyut 2 detik dan jeda 1 detik
+menyalakan kedua pompa pemupuk dalam pola denyut 2 detik dan jeda 1 detik
 sampai TDS mencapai 1000 ppm, lalu DIST mengalirkan campuran ke tanaman. Fase
 FERT punya timeout keamanan 120 detik agar tidak berjalan terus.
 
