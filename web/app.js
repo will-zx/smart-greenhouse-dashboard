@@ -15,9 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (DEMO_MODE) {
         document.getElementById('app').classList.remove('hidden');
         document.getElementById('login').classList.add('hidden');
-        document.getElementById('onlineBadge').classList.remove('on', 'off');
-        document.getElementById('onlineBadge').classList.add('demo');
-        document.getElementById('onlineText').textContent = 'Demo Mode';
+        document.getElementById('zoneBtn').classList.add('is-demo');
+        document.getElementById('zoneStatus').textContent = 'demo';
         applyRole(ADMIN_EMAIL);   // demo: tampilkan UI admin
         buildZoneSelect();
         loadDemoData();
@@ -241,12 +240,13 @@ function buildZoneSelect() {
                 </span>
                 ${i === currentZone ? '<svg class="z-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
             </button>
-            ${isAdmin ? '<button type="button" class="z-edit" title="Ganti nama greenhouse" aria-label="Ganti nama greenhouse"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>' : ''}`;
+            ${isAdmin ? `<input class="z-input" type="text" hidden aria-label="Nama greenhouse ${z.id}">
+                <button type="button" class="z-edit" title="Ganti nama greenhouse" aria-label="Ganti nama greenhouse"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>` : ''}`;
         row.querySelector('.z-name').textContent = labels[z.id] || z.name;
         row.querySelector('.z-id').textContent = z.id;
         row.querySelector('.z-pick').addEventListener('click', () => { switchZone(i); closeZoneMenu(); });
         const edit = row.querySelector('.z-edit');
-        if (edit) edit.addEventListener('click', () => renameZone(i));
+        if (edit) edit.addEventListener('click', () => startRename(i, row));
         list.appendChild(row);
     });
     // Nama unit yang sedang dipantau, supaya jelas data di halaman ini milik
@@ -308,31 +308,63 @@ async function loadLabels() {
     }
 }
 
-// Ganti nama greenhouse. Dipanggil dari tombol pensil di daftar unit, jadi
-// boleh untuk unit mana pun — bukan hanya yang sedang dipantau.
-function renameZone(i = currentZone) {
+// Ganti nama greenhouse dari dalam daftar unit.
+// Memakai input inline, BUKAN prompt(): prompt() diblokir di beberapa konteks
+// (iframe, embedded browser) sehingga tombolnya jadi tampak tidak berrespons.
+// Enter = simpan, Esc atau klik ke luar = batal.
+function startRename(i, row) {
+    const input = row.querySelector('.z-input');
+    row.querySelector('.z-text').hidden = true;
+    input.hidden = false;
+    input.value = labels[ZONES[i].id] || ZONES[i].name;
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = save => {
+        if (done) return;
+        done = true;
+        const val = input.value.trim();
+        row.querySelector('.z-text').hidden = false;
+        input.hidden = true;
+        if (save && val) saveRename(i, val);
+    };
+    input.onkeydown = e => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    input.onblur = () => finish(true);
+}
+
+function saveRename(i, val) {
     const id = ZONES[i].id;
-    const n = prompt('Nama greenhouse untuk ' + id + ':', labels[id] || ZONES[i].name);
-    if (!n) return;
-    const val = n.trim();
-    if (!val) return;
-    const status = document.getElementById('cmdStatus');
     sendLabel(val, id).then(ok => {
-        if (!ok) status.textContent = "Gagal menyimpan nama: akses ditolak";
-        else labels[id] = val;
+        if (!ok) showZoneMsg("Gagal menyimpan nama: akses ditolak");
+        else {
+            labels[id] = val;
+            showZoneMsg("Nama greenhouse disimpan", true);
+            if (i === currentZone) setOnlineText();
+        }
         buildZoneSelect();
-        if (i === currentZone) setOnlineText();
-        setTimeout(() => status.textContent = "", 4000);
     });
 }
 
-// Badge koneksi ikut memuat nama greenhouse, jadi harus disegarkan setiap
-// nama berubah (setelah ganti nama atau ganti unit).
+function showZoneMsg(text, ok = false) {
+    const el = document.getElementById('zoneMsg');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('ok', ok);
+    el.hidden = false;
+    clearTimeout(showZoneMsg.timer);
+    showZoneMsg.timer = setTimeout(() => el.hidden = true, 3000);
+}
+
+// Nama unit ikut tampil di tombol gabungan, jadi segarkan setelah nama
+// berubah (ganti nama atau ganti unit).
 function setOnlineText() {
-    if (document.getElementById('onlineBadge').classList.contains('demo')) return;
-    const text = document.getElementById('onlineText');
-    if (text.textContent.includes('offline')) text.textContent = zoneName() + ' offline';
-    else text.textContent = zoneName() + ' online · ' + new Date().toLocaleTimeString('id-ID');
+    if (document.getElementById('zoneBtn').classList.contains('is-demo')) return;
+    setOnline(!document.getElementById('zoneBtn').classList.contains('is-off'),
+        Math.floor(Date.now() / 1000) - (lastData ? lastData.ts : 0));
 }
 
 async function sendLabel(value, id) {
@@ -386,10 +418,10 @@ function loadDemoData() {
     document.getElementById('userEmail').textContent = 'demo@smartgreenhouse.local';
     document.getElementById('userAvatar').textContent = 'D';
     document.getElementById('userName').textContent = 'demo';
-    const badge = document.getElementById('onlineText');
-    badge.textContent = 'Demo Mode';
-    document.getElementById('onlineBadge').classList.remove('off', 'on');
-    document.getElementById('onlineBadge').classList.add('demo');
+    const btn = document.getElementById('zoneBtn');
+    btn.classList.remove('is-off', 'is-ok', 'is-stale');
+    btn.classList.add('is-demo');
+    document.getElementById('zoneStatus').textContent = 'demo';
 }
 
 function renderLogs(data) {
@@ -549,19 +581,21 @@ function setCtrlState(key, on) {
     el.classList.toggle('on', !!on);
 }
 
+// Status koneksi menulis ke tombol gabungan (nama unit + status dalam satu
+// pill). Nama unit sendiri sudah tampil di depan, jadi di sini hanya status.
 function setOnline(ok, age) {
-    const badge = document.getElementById('onlineBadge');
-    const text = document.getElementById('onlineText');
-    badge.classList.remove('on', 'off', 'demo');
-    badge.classList.add(ok ? 'on' : 'off');
-    const name = zoneName();
-    text.textContent = ok
-        ? name + ' online · ' + new Date().toLocaleTimeString('id-ID')
-        : name + ' offline';
-    if (ok && typeof age === 'number' && age > 60) {
-        text.textContent = name + ' diam ' + Math.round(age / 60) + ' menit';
-        badge.classList.remove('on');
-        badge.classList.add('off');
+    const btn = document.getElementById('zoneBtn');
+    const text = document.getElementById('zoneStatus');
+    btn.classList.remove('is-ok', 'is-off', 'is-stale');
+    if (!ok) {
+        btn.classList.add('is-off');
+        text.textContent = 'offline';
+    } else if (typeof age === 'number' && age > 60) {
+        btn.classList.add('is-stale');
+        text.textContent = 'diam ' + Math.round(age / 60) + ' mnt';
+    } else {
+        btn.classList.add('is-ok');
+        text.textContent = 'online';
     }
 }
 

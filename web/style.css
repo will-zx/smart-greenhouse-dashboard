@@ -145,6 +145,14 @@ body.nav-closed .shell { margin-left: 0; }
 }
 .zone-btn:hover { background: rgba(255,255,255,.24); }
 .zone-btn span { overflow: hidden; text-overflow: ellipsis; }
+.zone-btn-icon { display: none; flex-shrink: 0; }
+/* Status menyatu di tombol yang sama; pill tetap netral, hanya teks status
+   yang berubah warna sesuai kondisi. */
+.zone-sep, .zone-status { color: rgba(255,255,255,.8); }
+.zone-btn.is-ok .zone-status { color: #a7f3d0; }
+.zone-btn.is-stale .zone-status { color: #fde68a; }
+.zone-btn.is-off .zone-status { color: #fecaca; }
+.zone-btn.is-demo .zone-status { color: #e5e7eb; }
 .zone-menu {
     position: absolute;
     top: 42px; right: 0;
@@ -195,23 +203,6 @@ body.nav-closed .shell { margin-left: 0; }
 .z-edit:hover { background: rgba(21,101,192,.14); color: var(--accent-dark); }
 @media (hover: none) { .z-edit { opacity: 1; } }
 .zone-menu-hint { font-size: 11px; color: var(--muted); padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 6px; }
-
-.badge {
-    display: flex; align-items: center; gap: 6px;
-    padding: 5px 13px;
-    border-radius: 999px;
-    font-size: 11.5px;
-    font-weight: 600;
-    white-space: nowrap;
-}
-/* Badge status di topbar biru: warna solid agar kontras, warna = makna. */
-.badge.on { background: var(--ok); border: 1px solid rgba(255,255,255,.25); color: #fff; }
-.badge.on svg { color: #dcfce7; animation: pulse-dot 1.4s ease-in-out infinite; }
-.badge.off { background: var(--danger); border: 1px solid rgba(255,255,255,.25); color: #fff; }
-.badge.off svg { color: #fecaca; }
-.badge.demo { background: var(--muted); border: 1px solid rgba(255,255,255,.25); color: #fff; }
-.badge.demo svg { color: #e0e0e0; }
-@keyframes pulse-dot { 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
 
 .head-actions { display: flex; align-items: center; gap: 12px; }
 .zone-tag {
@@ -469,11 +460,18 @@ tbody td.num { color: var(--text); font-weight: 600; }
     .page-title { font-size: 15px; }
     .user-id { display: none; }
     .topbar-actions { gap: 8px; }
-    /* Nama greenhouse sudah tertulis di badge koneksi, jadi pil pemilih zona
-       tidak perlu-duka space di layar sempit. */
-    .zone-picker { display: none; }
-    /* Topbar sempit: teks brand disembunyikan (ikon greenhouse tetap), badge
-       dipotong elipsis supaya tidak menabrak avatar. */
+    /* Pemilih greenhouse TETAP ada di handphone (dulu disembunyikan, akibatnya
+       tidak ada cara berganti unit di layar kecil). Di sini hanya teks namanya
+       yang disembunyikan, diganti ikon greenhouse + panah. Nama unitnya sendiri
+       sudah tertulis di badge koneksi dan di header kartu. */
+    .zone-btn-icon { display: block; }
+    .zone-btn > span { display: none; }
+    .zone-btn { padding: 6px 10px; }
+    /* Menu tetap di kanan tombol (tombol berada di ujung kanan topbar), hanya
+       lebarnya yang dibatasi viewport supaya tidak keluar layar. */
+    .zone-menu { width: min(290px, calc(100vw - 24px)); }
+    /* Topbar sempit: teks brand disembunyikan (ikon greenhouse tetap) supaya
+       tidak menabrak tombol unit dan avatar. */
     .brand-text { display: none; }
     .brand { padding-right: 12px; }
     #onlineText { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }

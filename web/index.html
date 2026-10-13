@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Greenhouse Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=24">
+    <link rel="stylesheet" href="style.css?v=25">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -60,21 +60,22 @@
                 </div>
                 <h1 class="page-title" id="pageTitle">Beranda</h1>
                 <div class="topbar-actions">
-                    <!-- Pilih greenhouse: satu tombol, isi daftar muncul di popup -->
+                    <!-- Greenhouse aktif + status koneksi digabung dalam satu tombol:
+                     klik untuk membuka daftar unit -->
                     <div class="zone-picker">
                         <button class="zone-btn" id="zoneBtn" aria-haspopup="true" aria-expanded="false">
+                            <svg class="zone-btn-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
                             <span id="zoneBtnName">Greenhouse</span>
+                            <span class="zone-sep" aria-hidden="true">·</span>
+                            <span class="zone-status" id="zoneStatus">online</span>
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
                         </button>
                         <div class="zone-menu" id="zoneMenu" hidden>
                             <p class="zone-menu-title">Pilih greenhouse</p>
                             <div id="zoneList"></div>
+                            <p class="zone-msg" id="zoneMsg" hidden></p>
                             <p class="zone-menu-hint">Satu unit ESP32 per greenhouse. Data yang dipantau dan dikontrol mengikuti pilihan di atas.</p>
                         </div>
-                    </div>
-                    <div class="badge on" id="onlineBadge">
-                        <svg viewBox="0 0 10 10" width="8" height="8"><circle cx="5" cy="5" r="4" fill="currentColor"/></svg>
-                        <span id="onlineText">ESP Online</span>
                     </div>
                     <div class="header-user">
                         <button class="user-chip" id="userChip" aria-haspopup="true" aria-expanded="false">
@@ -277,7 +278,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=19"></script>
 
     <!--
       SETUP WAJIB:
