@@ -5,10 +5,8 @@
 // controlTask -> dilindungi mutex supaya satu iterasi fuzzy tidak melihat
 // campuran nilai lama/baru.
 static SemaphoreHandle_t mux = nullptr;
-static bool active = false;
-static bool manMist = false;
-static bool manIrig = false;
-static bool manBlower = false;
+static bool     active = false;
+static uint8_t  manual = 0;
 
 static void lock()   { if (mux) xSemaphoreTake(mux, portMAX_DELAY); }
 static void unlock() { if (mux) xSemaphoreGive(mux); }
@@ -20,29 +18,13 @@ void controlInit() {
 void controlRelease() {
     lock();
     active = false;
-    manMist = false;
-    manIrig = false;
-    manBlower = false;
+    manual = 0;
     unlock();
 }
 
-void controlSetMist(bool on) {
+void controlSet(uint8_t bit, bool on) {
     lock();
-    manMist = on;
-    active = true;
-    unlock();
-}
-
-void controlSetIrig(bool on) {
-    lock();
-    manIrig = on;
-    active = true;
-    unlock();
-}
-
-void controlSetBlower(bool on) {
-    lock();
-    manBlower = on;
+    if (on) manual |= bit; else manual &= ~bit;
     active = true;
     unlock();
 }
@@ -50,9 +32,9 @@ void controlSetBlower(bool on) {
 void controlApply(bool* mist, bool* irigasi, bool* blower) {
     lock();
     if (active) {
-        *mist = manMist;
-        *irigasi = manIrig;
-        *blower = manBlower;
+        *mist    = manual & C_MIST;
+        *irigasi = manual & C_IRIG;
+        *blower  = manual & C_BLOWER;
     }
     unlock();
 }

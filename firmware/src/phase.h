@@ -24,6 +24,5 @@ void  phaseReset();                   // mulai ulang penghitung durasi dari nol
 bool  phaseActive();                  // ada VPD target aktif?
 float phaseVpdTarget();               // VPD target saat ini (kPa)
 PhaseState phaseGet();                // snapshot lengkap (untuk telemetri/DB)
-bool  phaseElapsed();                 // true bila durasi > 0 dan sudah terlampaui
 
 #endif

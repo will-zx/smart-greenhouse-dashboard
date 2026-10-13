@@ -13,6 +13,5 @@ struct EmaFilter {
 
 void  emaInit(EmaFilter& f, float alpha);
 float emaUpdate(EmaFilter& f, float sample);
-void  emaReset(EmaFilter& f);
 
 #endif

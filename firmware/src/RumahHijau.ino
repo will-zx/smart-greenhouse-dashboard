@@ -4,7 +4,6 @@
 #include <freertos/semphr.h>
 #include "config.h"
 #include "sensor.h"
-#include "vpd.h"
 #include "filter.h"
 #include "phase.h"
 #include "irrigation.h"
@@ -43,6 +42,12 @@ static SemaphoreHandle_t snapMux = nullptr;
 
 // Filter EMA sinyal sensor (lihat filter.h). Alfa dari config.h.
 static EmaFilter tempFilter, humFilter, soilFilter;
+
+// VPD (Tetens): kPa = SVP - AVP.
+static float calcVpd(float temp, float humidity) {
+    float svp = 0.6108 * exp((17.27 * temp) / (temp + 237.3));
+    return svp - svp * (humidity / 100.0);
+}
 
 static void snapshotPublish(const Snapshot& s) {
     xSemaphoreTake(snapMux, portMAX_DELAY);
@@ -125,7 +130,7 @@ static void controlTask(void* arg) {
         tdsPpm = readTDS(sensorData.temperature);
 
         if (sensorData.valid) {
-            vpdValue = calculateVPD(sensorData.temperature, sensorData.humidity);
+            vpdValue = calcVpd(sensorData.temperature, sensorData.humidity);
             etcValue = calculateEtc(sensorData.temperature);
             fuzzyOut = fuzzyDecision(sensorData.temperature, sensorData.humidity,
                                      sensorData.soilMoisture, vpdValue, etcValue);

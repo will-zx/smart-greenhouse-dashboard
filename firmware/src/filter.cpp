@@ -15,8 +15,3 @@ float emaUpdate(EmaFilter& f, float sample) {
     }
     return f.value;
 }
-
-void emaReset(EmaFilter& f) {
-    f.value = 0.0f;
-    f.seeded = false;
-}

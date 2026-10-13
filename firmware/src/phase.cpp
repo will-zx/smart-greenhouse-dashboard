@@ -73,7 +73,3 @@ PhaseState phaseGet() {
     st.remainingSec = (s_durationSec > el) ? (s_durationSec - el) : 0;
     return st;
 }
-
-bool phaseElapsed() {
-    return s_durationSec > 0 && elapsedSec() >= s_durationSec;
-}

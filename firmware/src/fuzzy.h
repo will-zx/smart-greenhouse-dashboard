@@ -8,7 +8,6 @@ struct FuzzyOutput {
     bool blowerOn;
     float blowerLevel;   // 0..1, untuk kecepatan PWM blower (presisi VPD)
     bool irigasiOn;      // keputusan WAKTU irigasi (soil x ETc) -> memicu siklus 4 pompa
-    float irigasiLevel;  // 0..1 (cadangan untuk durasi/kuat, belum dipakai)
     const char* status;
 };
 

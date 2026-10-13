@@ -156,11 +156,11 @@ void pollCommands() {
     if (strcmp(action, "auto") == 0) {
         controlRelease();
     } else if (strcmp(action, "mist") == 0) {
-        controlSetMist(on);
+        controlSet(C_MIST, on);
     } else if (strcmp(action, "irigasi") == 0) {
-        controlSetIrig(on);
+        controlSet(C_IRIG, on);
     } else if (strcmp(action, "blower") == 0) {
-        controlSetBlower(on);
+        controlSet(C_BLOWER, on);
     } else if (strcmp(action, "set_vpd") == 0) {
         // value = VPD target (kPa). Contoh: {"action":"set_vpd","value":1.2}
         if (value.is<int>() || value.is<float>()) {

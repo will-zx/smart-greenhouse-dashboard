@@ -1,7 +1,0 @@
-.pio/
-.vscode/
-.pioenvs/
-.piolibdeps/
-.clangd/
-compile_commands.json
-src/secrets.h
