@@ -33,9 +33,6 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-right: 18px;
-    margin-right: 4px;
-    border-right: 1px solid rgba(255,255,255,.2);
     flex-shrink: 0;
 }
 /* greenhouse.png = garis hitam pekat dengan alpha transparan (tanpa latar
@@ -87,7 +84,9 @@ body {
 }
 .log-btn:hover { background: rgba(255,255,255,.24); }
 .log-btn[aria-expanded="true"] { background: #fff; color: var(--accent-dark); }
-.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+/* min-width:0 = boleh menyusut lebih kecil dari isinya, supaya pill unit
+   bisa dipotong (ellipsis) alih-alih mendorong branding keluar topbar. */
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
 
 /* Pilih greenhouse: tombol tunggal; daftar unit muncul di popup di bawahnya. */
 .zone-picker { position: relative; }
@@ -98,14 +97,16 @@ body {
     border-radius: 999px;
     padding: 6px 12px;
     color: #fff; font-family: inherit; font-size: 12px; font-weight: 600;
-    cursor: pointer; white-space: nowrap; max-width: 270px;
+    cursor: pointer; white-space: nowrap; max-width: 270px; min-width: 0;
 }
 .zone-btn:hover { background: rgba(255,255,255,.24); }
-/* Nama unit boleh dipotong, status tidak — status adalah informasi yang
-   selalu harus terbaca utuh. */
+/* Nama unit boleh dipotong duluan. Status juga boleh menyusut (ellipsis), tapi
+   hanya sebagai upaya terakhir di layar sempit — branding dan chevron tidak
+   boleh terpotong, dan teks statusnya tetap terbaca utuh di layar normal. */
 .zone-btn span { overflow: hidden; text-overflow: ellipsis; }
 #zoneBtnName { flex: 0 1 auto; min-width: 0; }
-.zone-btn .zone-sep, .zone-btn .zone-status { flex: 0 0 auto; }
+.zone-btn .zone-sep { flex: 0 0 auto; }
+.zone-btn .zone-status { flex: 0 1 auto; min-width: 0; }
 .zone-btn-icon { display: none; flex-shrink: 0; }
 /* Status menyatu di tombol yang sama; pill tetap netral, hanya teks status
    yang berubah warna sesuai kondisi. */
@@ -477,11 +478,13 @@ tbody td.num { color: var(--text); font-weight: 600; }
     /* Menu tetap di kanan tombol (tombol berada di ujung kanan topbar), hanya
        lebarnya yang dibatasi viewport supaya tidak keluar layar. */
     .zone-menu { width: min(290px, calc(100vw - 24px)); }
-    /* Topbar sempit: teks brand disembunyikan (ikon greenhouse tetap) supaya
-       tidak menabrak tombol unit dan avatar. */
-    .brand-text { display: none; }
-    .brand { padding-right: 12px; }
-    #onlineText { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+    /* Sidebar sudah dihapus dan brand pindah ke topbar, jadi teksnya tidak lagi
+       boleh disembunyikan. Dikecilkan sedikit supaya tetap muat; kalau layar
+       benar-benar sempit, pill unit yang lebih dulu dipotong — branding lebih
+       penting daripada nama unit. */
+    .brand-text { font-size: 11px; letter-spacing: .8px; }
+    .brand { gap: 8px; }
+    .brand-icon { width: 24px; height: 24px; }
     .metric .value { font-size: 25px; }
     .card { padding: 16px; }
     .chart-wrap { height: 240px; }
