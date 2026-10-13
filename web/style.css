@@ -164,6 +164,9 @@ body.nav-closed .shell { margin-left: 0; }
 .zone-row {
     display: flex; align-items: center; gap: 2px;
     border-radius: 8px;
+    /* Wajib eksplisit: .zone-menu berada di dalam .topbar yang berwarna putih,
+       tanpa ini nama unit mewarisi warna putih dan hilang di atas kartu putih. */
+    color: var(--text);
 }
 .zone-row:hover { background: var(--card-2); }
 .zone-row.active { background: var(--accent-soft); color: var(--accent-dark); }

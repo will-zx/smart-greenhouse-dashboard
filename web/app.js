@@ -98,19 +98,21 @@ document.addEventListener('DOMContentLoaded', () => {
     burger.addEventListener('click', toggleNav);
     document.getElementById('navBackdrop').addEventListener('click', closeNav);
 
-    // Ikon Refresh berputar selama pemuatan. Dipanggil lewat listener (bukan
-    // onclick inline) supaya kita bisa tahu kapan fetch selesai.
-    document.getElementById('refreshBtn').addEventListener('click', async () => {
-        const btn = document.getElementById('refreshBtn');
-        btn.classList.add('spinning');
-        const t0 = Date.now();
-        try {
-            await fetchDataLogs();
-        } finally {
-            // Putar minimal ~0.5 s supaya perputarannya terlihat, walau fetch
-            // selesai secepatnya.
-            setTimeout(() => btn.classList.remove('spinning'), Math.max(0, 500 - (Date.now() - t0)));
-        }
+    // Ikon Refresh berputar selama pemuatan, di kedua halaman (Beranda & Log).
+    // Dipanggil lewat listener (bukan onclick inline) supaya kita tahu kapan
+    // fetch selesai.
+    document.querySelectorAll('.refresh').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            btn.classList.add('spinning');
+            const t0 = Date.now();
+            try {
+                await fetchDataLogs();
+            } finally {
+                // Putar minimal ~0.5 s supaya perputarannya terlihat, walau
+                // fetch selesai secepatnya.
+                setTimeout(() => btn.classList.remove('spinning'), Math.max(0, 500 - (Date.now() - t0)));
+            }
+        });
     });
 
     // Search + "Show N entries" hanya relevan di halaman Log.
@@ -248,8 +250,8 @@ function buildZoneSelect() {
         list.appendChild(row);
     });
     // Nama unit yang sedang dipantau, supaya jelas data di halaman ini milik
-    // greenhouse yang mana (bukan jumlah unit).
-    document.getElementById('zoneCount').textContent = zoneName();
+    // greenhouse yang mana (bukan jumlah unit). Muncul di header Beranda & Log.
+    document.querySelectorAll('.zone-tag').forEach(el => el.textContent = zoneName());
 }
 
 function switchZone(i) {
@@ -268,6 +270,8 @@ function switchZone(i) {
     renderLogTable();
     setOnline(false);
     buildZoneSelect();
+    // Demo tidak punya RTDB per unit -> isi ulang data dummy agar tidak kosong.
+    if (DEMO_MODE) { loadDemoData(); return; }
     fetchDataLogs();
 }
 
