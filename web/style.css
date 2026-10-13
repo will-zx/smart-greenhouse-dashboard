@@ -162,17 +162,35 @@ body.nav-closed .shell { margin-left: 0; }
     padding: 6px 8px 8px;
 }
 .zone-row {
-    display: flex; align-items: center; gap: 9px;
-    width: 100%; padding: 9px 10px;
-    background: none; border: none; border-radius: 8px;
-    font-family: inherit; text-align: left; cursor: pointer;
-    color: var(--text);
+    display: flex; align-items: center; gap: 2px;
+    border-radius: 8px;
 }
 .zone-row:hover { background: var(--card-2); }
 .zone-row.active { background: var(--accent-soft); color: var(--accent-dark); }
+.z-pick {
+    display: flex; align-items: center; gap: 9px;
+    flex: 1; min-width: 0;
+    padding: 9px 10px;
+    background: none; border: none; border-radius: 8px;
+    font-family: inherit; text-align: left; cursor: pointer;
+    color: inherit;
+}
+.z-text { display: flex; flex-direction: column; min-width: 0; }
 .zone-row .z-name { font-size: 13px; font-weight: 600; }
 .zone-row .z-id { font-size: 10.5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .zone-row .z-check { margin-left: auto; color: var(--accent); flex-shrink: 0; }
+/* Tombol pensil: muncul saat kursor di atas baris di desktop. Di perangkat
+   sentuh tidak ada hover, jadi selalu tampil agar tidak pernah tersembunyi. */
+.z-edit {
+    display: grid; place-items: center;
+    width: 28px; height: 28px; margin-right: 6px;
+    background: none; border: none; border-radius: 6px;
+    color: var(--muted); cursor: pointer;
+    opacity: 0; transition: opacity .12s, background .12s;
+}
+.zone-row:hover .z-edit, .z-edit:focus-visible { opacity: 1; }
+.z-edit:hover { background: rgba(21,101,192,.14); color: var(--accent-dark); }
+@media (hover: none) { .z-edit { opacity: 1; } }
 .zone-menu-hint { font-size: 11px; color: var(--muted); padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 6px; }
 
 .badge {
@@ -193,6 +211,17 @@ body.nav-closed .shell { margin-left: 0; }
 @keyframes pulse-dot { 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
 
 .head-actions { display: flex; align-items: center; gap: 12px; }
+.zone-tag {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* ============ USER MENU ============ */
 .header-user { position: relative; }
@@ -208,7 +237,10 @@ body.nav-closed .shell { margin-left: 0; }
     font-family: inherit;
     text-align: left;
 }
-.user-chip:hover, .user-chip:active { background: rgba(255,255,255,.12); }
+/* Hover tidak pakai isian putih transparan: teks di dalam chip sudah putih,
+   latar putih transparan membuat "Super Admin" bertabrakan dengan cardnya.
+   Cukup cincin tipis di sekeliling. */
+.user-chip:hover, .user-chip:active { background: none; box-shadow: 0 0 0 2px rgba(255,255,255,.28); }
 .user-chip:focus { outline: none; }
 .user-chip:focus-visible { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; }
 .user-id { display: flex; flex-direction: column; line-height: 1.25; }
@@ -389,6 +421,12 @@ tbody td.num { color: var(--text); font-weight: 600; }
 }
 .refresh:hover { background: var(--card-2); }
 .refresh svg { color: var(--accent); }
+.refresh.spinning svg { animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Menghormati pengguna yang sensitif terhadap animasi (prefers-reduced-motion) */
+@media (prefers-reduced-motion: reduce) {
+    .refresh.spinning svg { animation: none; }
+}
 .empty { text-align: center; color: var(--muted); padding: 24px; }
 .empty.error { color: var(--danger); }
 

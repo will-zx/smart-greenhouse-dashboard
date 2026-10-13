@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Greenhouse Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=23">
+    <link rel="stylesheet" href="style.css?v=24">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -150,7 +150,14 @@
                     <div class="card">
                         <div class="card-head">
                             <h2>Grafik Tren Sensor</h2>
-                            <span class="note" id="freshness"></span>
+                            <div class="head-actions">
+                                <span class="note" id="freshness"></span>
+                                <span class="note zone-tag" id="zoneCount"></span>
+                                <button class="refresh" id="refreshBtn" title="Muat ulang data sensor">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                                    Refresh
+                                </button>
+                            </div>
                         </div>
                         <div class="chart-wrap"><canvas id="sensorChart"></canvas></div>
                     </div>
@@ -224,13 +231,6 @@
                             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                             Histori Data Log Sensor
                         </h2>
-                            <div class="head-actions">
-                                <span class="note" id="zoneCount"></span>
-                                <button class="refresh" onclick="fetchDataLogs()">
-                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
-                                    Refresh
-                                </button>
-                            </div>
                         </div>
                         <div class="table-bar">
                             <label class="show-label" for="showEntries">Show
@@ -270,7 +270,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=16"></script>
+    <script src="app.js?v=17"></script>
 
     <!--
       SETUP WAJIB:

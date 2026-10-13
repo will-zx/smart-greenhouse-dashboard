@@ -98,6 +98,21 @@ document.addEventListener('DOMContentLoaded', () => {
     burger.addEventListener('click', toggleNav);
     document.getElementById('navBackdrop').addEventListener('click', closeNav);
 
+    // Ikon Refresh berputar selama pemuatan. Dipanggil lewat listener (bukan
+    // onclick inline) supaya kita bisa tahu kapan fetch selesai.
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('refreshBtn');
+        btn.classList.add('spinning');
+        const t0 = Date.now();
+        try {
+            await fetchDataLogs();
+        } finally {
+            // Putar minimal ~0.5 s supaya perputarannya terlihat, walau fetch
+            // selesai secepatnya.
+            setTimeout(() => btn.classList.remove('spinning'), Math.max(0, 500 - (Date.now() - t0)));
+        }
+    });
+
     // Search + "Show N entries" hanya relevan di halaman Log.
     document.getElementById('logSearch').addEventListener('input', e => {
         logFilter = e.target.value.trim().toLowerCase();
@@ -214,22 +229,27 @@ function buildZoneSelect() {
     const list = document.getElementById('zoneList');
     list.innerHTML = '';
     ZONES.forEach((z, i) => {
-        const row = document.createElement('button');
-        row.type = 'button';
+        const row = document.createElement('div');
         row.className = 'zone-row' + (i === currentZone ? ' active' : '');
         row.innerHTML = `
-            <span>
-                <span class="z-name"></span>
-                <span class="z-id"></span>
-            </span>
-            ${i === currentZone ? '<svg class="z-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' : ''}`;
+            <button type="button" class="z-pick">
+                <span class="z-text">
+                    <span class="z-name"></span>
+                    <span class="z-id"></span>
+                </span>
+                ${i === currentZone ? '<svg class="z-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' : ''}
+            </button>
+            ${isAdmin ? '<button type="button" class="z-edit" title="Ganti nama greenhouse" aria-label="Ganti nama greenhouse"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>' : ''}`;
         row.querySelector('.z-name').textContent = labels[z.id] || z.name;
         row.querySelector('.z-id').textContent = z.id;
-        row.addEventListener('click', () => { switchZone(i); closeZoneMenu(); });
+        row.querySelector('.z-pick').addEventListener('click', () => { switchZone(i); closeZoneMenu(); });
+        const edit = row.querySelector('.z-edit');
+        if (edit) edit.addEventListener('click', () => renameZone(i));
         list.appendChild(row);
     });
-    document.getElementById('zoneCount').textContent =
-        ZONES.length > 1 ? ZONES.length + ' greenhouse' : '';
+    // Nama unit yang sedang dipantau, supaya jelas data di halaman ini milik
+    // greenhouse yang mana (bukan jumlah unit).
+    document.getElementById('zoneCount').textContent = zoneName();
 }
 
 function switchZone(i) {
@@ -284,17 +304,20 @@ async function loadLabels() {
     }
 }
 
-function renameZone() {
-    const n = prompt('Nama greenhouse untuk ' + zoneId() + ':', zoneName());
+// Ganti nama greenhouse. Dipanggil dari tombol pensil di daftar unit, jadi
+// boleh untuk unit mana pun — bukan hanya yang sedang dipantau.
+function renameZone(i = currentZone) {
+    const id = ZONES[i].id;
+    const n = prompt('Nama greenhouse untuk ' + id + ':', labels[id] || ZONES[i].name);
     if (!n) return;
     const val = n.trim();
     if (!val) return;
     const status = document.getElementById('cmdStatus');
-    sendLabel(val).then(ok => {
+    sendLabel(val, id).then(ok => {
         if (!ok) status.textContent = "Gagal menyimpan nama: akses ditolak";
-        else labels[zoneId()] = val;
+        else labels[id] = val;
         buildZoneSelect();
-        setOnlineText();
+        if (i === currentZone) setOnlineText();
         setTimeout(() => status.textContent = "", 4000);
     });
 }
@@ -308,12 +331,12 @@ function setOnlineText() {
     else text.textContent = zoneName() + ' online · ' + new Date().toLocaleTimeString('id-ID');
 }
 
-async function sendLabel(value) {
+async function sendLabel(value, id) {
     if (DEMO_MODE) return true;
     try {
         const token = await auth.currentUser.getIdToken();
         // null menghapus label -> dashboard kembali ke nama default.
-        const res = await fetch(`${DB_URL}/labels/${zoneId()}.json?auth=${token}`, {
+        const res = await fetch(`${DB_URL}/labels/${id}.json?auth=${token}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(value)
@@ -564,8 +587,11 @@ function applyLocalCommand(action, value) {
 async function sendCommand(action, value) {
     const status = document.getElementById('cmdStatus');
     status.textContent = "Mengirim perintah...";
+    // Terapkan ke tampilan SEBELUM menunggu jaringan. Browser sudah mencentang
+    // checkbox seketika saat diklik; kalau teks menunggu balasan RTDB (ratusan
+    // ms), switch dan tulisan ON/OFF terlihat bertentangan.
+    applyLocalCommand(action, value);
     if (DEMO_MODE) {
-        applyLocalCommand(action, value);
         status.textContent = action === "auto"
             ? "Demo: mode otomatis (semua kembalikan ke fuzzy)"
             : "Demo: " + action + " " + (value ? "ON" : "OFF");
@@ -580,11 +606,11 @@ async function sendCommand(action, value) {
             body: JSON.stringify({ action: action, value: value })
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        // Auto/switch dimatikan seketika di UI; device mengeksekusi <=5 s lalu
-        // mengonfirmasi lewat push berikutnya (<=20 s).
-        applyLocalCommand(action, value);
+        // Device mengeksekusi <=5 s lalu mengonfirmasi lewat push (<=20 s).
         status.textContent = "Perintah " + action + " terkirim ke " + zoneId() + " (dieksekusi hingga 5 detik)";
     } catch (e) {
+        // Perintah gagal: kembalikan tampilan ke kondisi sebelum diklik.
+        applyLocalCommand(action, !value);
         status.textContent = "Gagal kirim: " + e.message;
     }
     setTimeout(() => status.textContent = "", 4000);
