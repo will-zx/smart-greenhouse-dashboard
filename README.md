@@ -89,12 +89,25 @@ modul XY-MOS aktif-LOW dapat dipakai tanpa mengubah kode.
 
 ## Cara kerja
 
-```text
-Sensor (SHT31, soil, TDS)
- └─> Filter EMA ─> VPD, ETc ─> Fuzzy Mamdani ─> Aktuator
-                                                      └─> Irigasi 4 pompa
-                          -> Firebase RTDB <- Dashboard web
+```mermaid
+flowchart LR
+  subgraph ESP ["ESP32 · controlTask (core 1) · tiap 2 detik"]
+    direction LR
+    S["SHT31<br/>Soil · TDS"] --> F["filter EMA"] --> V["VPD · ETc"] --> Z{{"fuzzy Mamdani"}} --> A["aktuator<br/>misting · blower · 4 pompa"]
+  end
+  R[("Firebase RTDB")]
+  D["Dashboard web"]
+  A -- "① push sensor_logs (20 detik)" --> R
+  R -- "② dashboard baca (10 detik)" --> D
+  D -- "③ perintah, khusus admin" --> R
+  R -- "④ poll perintah (5 detik)" --> A
 ```
+
+Empat alur yang perlu diikuti: sensor dibaca dan aktuator diputuskan sepenuhnya
+di ESP32 (tiap 2 detik), ESP32 mengunggah log sensor ke RTDB, dashboard
+menariknya kembali, dan perintah admin dikirim lewat RTDB lalu dieksekusi
+perangkat setiap 5 detik. Jalur ② dan ③ tetap melewati RTDB karena itulah
+satu-satunya penghubung antara perangkat dan peramban.
 
 **Kontrol fuzzy.** Logika fuzzy Mamdani dengan membership function tripel untuk
 suhu, kelembapan, tanah, VPD, dan ETc. Aturan disimpan sebagai tabel di
