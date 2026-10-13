@@ -107,10 +107,14 @@ function setIdentity(user, forceAdmin = false) {
     buildZoneSelect();   // ikon pensil ikut menyesuaikan peran
 }
 
-// Kartu Kontrol + ikon pensil hanya untuk admin. (Badge peran sudah diatur
-// di setIdentity.)
+// Kartu Kontrol tetap terlihat untuk semua orang (=status aktuator berguna
+// untuk dipantau), tetapi sakelarnya disembunyikan bila belum login admin.
+// Ikon pensil di popup greenhouse tetap khusus admin.
 function applyRoleView() {
-    document.getElementById('ctrlCard').classList.toggle('hidden', !isAdmin);
+    const card = document.getElementById('ctrlCard');
+    card.classList.toggle('read-only', !isAdmin);
+    document.getElementById('ctrlNote').textContent =
+        isAdmin ? 'Kontrol remot via Firebase RTDB' : 'Hanya lihat — login untuk kontrol manual';
 }
 
 // Popup akun: Tamu melihat item "Login", admin melihat "Keluar".
