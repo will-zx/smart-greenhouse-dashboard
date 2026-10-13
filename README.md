@@ -32,6 +32,8 @@ dengan status ON/OFF dan sakelarnya. Kartu ini terlihat untuk semua orang, tapi
 baris (10/20/50) dan pencarian. Tampilan menyesuaikan lebar layar, dari ponsel
 sampai monitor lebar.
 
+![Log Sensor](docs/log-sensor.png)
+
 Menambah unit greenhouse = tambah baris di `ZONES` (`web/config.js`) dengan
 `id` yang sama dengan `DEVICE_ID` firmware, plus tambahkan UID perangkat itu ke
 allowlist rules RTDB.
