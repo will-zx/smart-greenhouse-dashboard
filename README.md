@@ -22,6 +22,22 @@ tanah, VPD, ET0, dan TDS) plus grafik tren 20 titik terakhir.
 **Kontrol** menampilkan satu baris per aktuator (Misting, Irigasi, Blower,
 Auto) dengan status ON/OFF dan sakelarnya, hanya untuk admin.
 
+## Akses
+
+Dashboard **terbuka untuk semua orang**: siapa pun bisa membuka halaman dan
+melihat data sensor tanpa login, dan tampil sebagai **Tamu**. Untuk
+kendali manual atau mengelola greenhouse, klik avatar **Tamu** → **Login**.
+
+| Peran | Akun | Boleh |
+|---|---|---|
+| Tamu | tanpa akun | baca semua metrik, grafik, dan log |
+| Admin | `mr.pman@mail.unnes.ac.id` | + kontrol aktuator & ganti nama greenhouse |
+| Perangkat | satu akun per ESP32 | push sensor, terima perintah |
+
+Cukup dua jenis akun: **admin** dan **ESP32**. Penulisan dijaga RTDB rules
+(allowlist UID); pembacaan dibuka publik. Detail & cara menempelkan rules ada di
+[`web/TUTORIAL.md`](web/TUTORIAL.md).
+
 ![Kontrol](docs/kontrol.png)
 
 **Log Sensor** menampilkan histori dalam tabel, lengkap dengan pilihan jumlah

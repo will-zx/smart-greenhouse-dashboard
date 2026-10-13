@@ -255,6 +255,8 @@ body.nav-closed .shell { margin-left: 0; }
     flex-shrink: 0;
     line-height: 1;
 }
+/* Tamu: avatar memakai ikon incognito (topi + kacamata) seperti Chrome */
+.avatar svg { width: 19px; height: 19px; }
 .user-menu {
     position: absolute;
     top: 44px;
@@ -425,12 +427,22 @@ tbody td.num { color: var(--text); font-weight: 600; }
 .empty.error { color: var(--danger); }
 
 /* ============ LOGIN ============ */
-.login-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.login-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; z-index: 60; }
 .login-box {
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 32px 28px; width: 360px; max-width: 90%;
     box-shadow: 0 4px 16px rgba(16,24,40,.08);
 }
+.login-box { position: relative; }
+.login-close {
+    position: absolute;
+    top: 10px; right: 10px;
+    display: grid; place-items: center;
+    width: 30px; height: 30px;
+    background: none; border: none; border-radius: 8px;
+    color: var(--muted); cursor: pointer;
+}
+.login-close:hover { background: var(--card-2); color: var(--text); }
 .login-box h2 { font-size: 18px; margin-bottom: 4px; color: var(--text); }
 .login-box p { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
 .login-box label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; font-weight: 600; }
@@ -446,6 +458,10 @@ tbody td.num { color: var(--text); font-weight: 600; }
 .login-error { color: var(--danger); font-size: 12px; margin-top: 12px; min-height: 16px; }
 
 .hidden { display: none !important; }
+/* Atribut `hidden` harus menang atas aturan class yang memakai `display`
+   (mis. .login-overlay { display:flex }) — tanpa ini elemennya tetap terlihat
+   walau hidden="true". */
+[hidden] { display: none !important; }
 
 /* ============ RESPONSIF ============ */
 @media (max-width: 900px) {

@@ -11,40 +11,33 @@ let logData = [];         // log terakhir yang sudah difilter (untuk render tabe
 let logFilter = '';       // teks pencarian log
 let logLimit = 20;        // berapa baris yang diambil dari RTDB (dropdown "Show N entries")
 
+// Dashboard terbuka untuk semua orang: data sensor dibaca tanpa login, dan
+// hanya kontrol aktuator / ganti nama greenhouse yang butuh akun admin.
+// Tamu -> klik avatar -> popup akun -> item "Login".
 document.addEventListener('DOMContentLoaded', () => {
+    const app = document.getElementById('app');
+    const login = document.getElementById('login');
+    login.hidden = true;
+    app.classList.remove('hidden');
+
     if (DEMO_MODE) {
-        document.getElementById('app').classList.remove('hidden');
-        document.getElementById('login').classList.add('hidden');
         document.getElementById('zoneBtn').classList.add('is-demo');
         document.getElementById('zoneStatus').textContent = 'demo';
-        applyRole(ADMIN_EMAIL);   // demo: tampilkan UI admin
-        buildZoneSelect();
+        setIdentity({ email: 'demo@smartgreenhouse.local' }, true);  // demo: tampilkan UI admin
         loadDemoData();
         return;
     }
 
-    // Firebase Auth: tanda tangan Email/Password sebelum data dimuat.
     // config.js menyediakan firebaseConfig, DB_URL, ZONES, ADMIN_EMAIL.
-    // Persistence default = local: sesi tersimpan di browser, auto-login tiap buka.
+    // Persistence default = local: sesi admin tersimpan di browser.
     firebase.initializeApp(firebaseConfig);
     auth = firebase.auth();
 
-    auth.onAuthStateChanged(user => {
-        const app = document.getElementById('app');
-        const login = document.getElementById('login');
-        if (user) {
-            app.classList.remove('hidden');
-            login.classList.add('hidden');
-            document.getElementById('userEmail').textContent = user.email;
-            document.getElementById('userAvatar').textContent = (user.email || '?').charAt(0).toUpperCase();
-            document.getElementById('userName').textContent = (user.email || '?').split('@')[0];
-            applyRole(user.email);
-            startDashboard();
-        } else {
-            app.classList.add('hidden');
-            login.classList.remove('hidden');
-        }
-    });
+    setIdentity(null);            // mulai sebagai tamu
+    startDashboard();             // polling jalan untuk tamu (tanpa token)
+
+    // onAuthStateChanged juga menangani login/keluar saat aplikasi sudah terbuka.
+    auth.onAuthStateChanged(user => setIdentity(user));
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -54,13 +47,73 @@ document.addEventListener('DOMContentLoaded', () => {
         const pass = document.getElementById('loginPass').value;
         try {
             await auth.signInWithEmailAndPassword(email, pass);
+            login.hidden = true;
+            err.textContent = '';
         } catch (e2) {
             err.textContent = e2.message;
         }
     });
 });
 
-// Avatar: klik membuka menu akun, klik di luar menutupnya.
+// Menutup modal login: terdaftar terpisah dari blok di atas supaya tetap
+// bekerja di mode demo (yang keluar lebih awal) maupun saat modal dibuka dari
+// popup akun.
+document.addEventListener('DOMContentLoaded', () => {
+    const login = document.getElementById('login');
+    document.getElementById('loginClose').addEventListener('click', () => {
+        login.hidden = true;
+        document.getElementById('loginError').textContent = '';
+    });
+    login.addEventListener('click', e => { if (e.target === login) login.hidden = true; });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') login.hidden = true; });
+});
+
+// Ikon incognito untuk tamu (topi + kacamata), Login/keluar tidak bergantian.
+const INCOGNITO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 13.2c4.6-1.5 14.2-1.5 18.8 0"/><path d="M7.8 13 9.4 7.6h5.2L16.2 13"/><path d="M5.2 16.6 5 15.2"/><path d="M18.8 16.6 19 15.2"/><circle cx="7.4" cy="18.2" r="2.7"/><circle cx="16.6" cy="18.2" r="2.7"/><path d="M10.1 18.2h3.8"/></svg>';
+
+// Menentukan tampilan identitas di topbar & popup akun.
+// user = null  -> Tamu (ikon incognito, tanpa kontrol)
+// user != null -> Admin (kalau emailnya cocok) atau User (hanya lihat)
+function setIdentity(user, forceAdmin = false) {
+    const email = user && user.email ? user.email : null;
+    const admin = forceAdmin || (!!email && email === ADMIN_EMAIL);
+    isAdmin = admin;
+
+    const avatar = document.getElementById('userAvatar');
+    const nameEl = document.getElementById('userName');
+    const roleEl = document.getElementById('userRole');
+    const menuMail = document.getElementById('userEmail');
+    const badge = document.getElementById('roleBadge');
+
+    if (email) {
+        avatar.textContent = email.charAt(0).toUpperCase();
+        nameEl.textContent = email.split('@')[0];
+        roleEl.textContent = admin ? 'Admin' : 'User';
+        menuMail.textContent = email;
+        badge.textContent = admin ? 'Admin' : 'User';
+        badge.classList.toggle('admin', admin);
+    } else {
+        avatar.innerHTML = INCOGNITO_ICON;
+        nameEl.textContent = 'Tamu';
+        roleEl.textContent = 'Hanya lihat';
+        menuMail.textContent = 'Tamu';
+        badge.textContent = 'Hanya lihat';
+        badge.classList.remove('admin');
+    }
+
+    document.getElementById('loginItem').hidden = !!email;
+    document.getElementById('logoutItem').hidden = !email;
+    applyRoleView();
+    buildZoneSelect();   // ikon pensil ikut menyesuaikan peran
+}
+
+// Kartu Kontrol + ikon pensil hanya untuk admin. (Badge peran sudah diatur
+// di setIdentity.)
+function applyRoleView() {
+    document.getElementById('ctrlCard').classList.toggle('hidden', !isAdmin);
+}
+
+// Popup akun: Tamu melihat item "Login", admin melihat "Keluar".
 document.addEventListener('DOMContentLoaded', () => {
     const chip = document.getElementById('userChip');
     const menu = document.getElementById('userMenu');
@@ -69,6 +122,12 @@ document.addEventListener('DOMContentLoaded', () => {
         menu.hidden = !open;
         chip.setAttribute('aria-expanded', String(open));
         e.stopPropagation();
+    });
+    document.getElementById('loginItem').addEventListener('click', () => {
+        menu.hidden = true;
+        chip.setAttribute('aria-expanded', 'false');
+        document.getElementById('login').hidden = false;
+        document.getElementById('loginEmail').focus();
     });
     document.addEventListener('click', () => {
         menu.hidden = true;
@@ -168,16 +227,6 @@ function zoneName() {
     return labels[zoneId()] || ZONES[currentZone].name;
 }
 
-// Kontrol aktuator & set label hanya untuk admin. RTDB rules yang sesungguhnya
-// menolak non-admin; ini menyembunyikan UI supaya tidak membingungkan.
-function applyRole(email) {
-    isAdmin = (email === ADMIN_EMAIL);
-    document.getElementById('ctrlCard').classList.toggle('hidden', !isAdmin);
-    const badge = document.getElementById('roleBadge');
-    badge.textContent = isAdmin ? 'Admin' : 'Mode lihat';
-    badge.classList.toggle('admin', isAdmin);
-    document.getElementById('userRole').textContent = isAdmin ? 'Super Admin' : 'Mode Lihat';
-}
 
 // Grafik membaca palet yang sama dengan style.css, jadi tidak ada warna
 // yang "melenceng" dari skema dashboard.
@@ -296,11 +345,21 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('zoneMenu').addEventListener('click', e => e.stopPropagation());
 });
 
+// Pembacaan data_sensor boleh tanpa login (RTDB rules .read: true), jadi
+// token hanya ditambahkan bila sudah login. Penulisan (commands/labels)
+// tetap memakai token dan hanya admin yang diizinkan rules.
+async function apiRead(path) {
+    let token = null;
+    try {
+        if (auth && auth.currentUser) token = await auth.currentUser.getIdToken();
+    } catch (e) { /* tamu: lanjut tanpa token */ }
+    return `${DB_URL}/${path}${token ? '?auth=' + token : ''}`;
+}
+
 async function loadLabels() {
     if (DEMO_MODE) return;
     try {
-        const token = await auth.currentUser.getIdToken();
-        const res = await fetch(`${DB_URL}/labels.json?auth=${token}`);
+        const res = await fetch(await apiRead('labels.json'));
         if (!res.ok) return;
         labels = (await res.json()) || {};
     } catch (e) {
@@ -369,6 +428,7 @@ function setOnlineText() {
 
 async function sendLabel(value, id) {
     if (DEMO_MODE) return true;
+    if (!auth || !auth.currentUser) return false;   // tamu tidak boleh menulis
     try {
         const token = await auth.currentUser.getIdToken();
         // null menghapus label -> dashboard kembali ke nama default.
@@ -505,8 +565,9 @@ function fmtLogTime(ts) {
 
 async function fetchDataLogs() {
     try {
-        const token = await auth.currentUser.getIdToken();
-        const res = await fetch(`${DB_URL}/zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=${logLimit}&auth=${token}`);
+        if (DEMO_MODE) return;
+        const path = `zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=${logLimit}`;
+        const res = await fetch(await apiRead(path));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const obj = await res.json();
         if (!obj) throw new Error('kosong');
@@ -624,6 +685,12 @@ function applyLocalCommand(action, value) {
 
 async function sendCommand(action, value) {
     const status = document.getElementById('cmdStatus');
+    // Tamu tidak punya UI kontrol, tapi tetap dijaga agar tidak bisa menulis.
+    if (!DEMO_MODE && (!auth || !auth.currentUser)) {
+        status.textContent = "Kamu sedang masuk sebagai tamu — login untuk kontrol";
+        setTimeout(() => status.textContent = "", 4000);
+        return;
+    }
     status.textContent = "Mengirim perintah...";
     // Terapkan ke tampilan SEBELUM menunggu jaringan. Browser sudah mencentang
     // checkbox seketika saat diklik; kalau teks menunggu balasan RTDB (ratusan
