@@ -1,7 +1,3 @@
-// true = mode demo (data dummy, tanpa Firebase/auth, cocok untuk presentasi).
-// false = mode produksi (Firebase Auth + RTDB live).
-const DEMO_MODE = false;
-
 let auth = null;
 let currentZone = 0;      // index ke ZONES
 let labels = {};          // { deviceId: "Nama tanaman" } dari RTDB
@@ -19,14 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const login = document.getElementById('login');
     login.hidden = true;
     app.classList.remove('hidden');
-
-    if (DEMO_MODE) {
-        document.getElementById('zoneBtn').classList.add('is-demo');
-        document.getElementById('zoneStatus').textContent = 'demo';
-        setIdentity({ email: 'demo@smartgreenhouse.local' }, true);  // demo: tampilkan UI admin
-        loadDemoData();
-        return;
-    }
 
     // config.js menyediakan firebaseConfig, DB_URL, ZONES, ADMIN_EMAIL.
     // Persistence default = local: sesi admin tersimpan di browser.
@@ -184,9 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('showEntries').addEventListener('change', e => {
         logLimit = parseInt(e.target.value, 10) || 20;
-        // Demo tidak punya auth/RTDB untuk diambil ulang; cukup render ulang.
-        if (DEMO_MODE) renderLogTable();
-        else fetchDataLogs();   // jumlah baris berubah -> ambil ulang dari RTDB
+        fetchDataLogs();   // jumlah baris berubah -> ambil ulang dari RTDB
     });
 });
 
@@ -219,7 +205,6 @@ function closeNav() {
 }
 
 function signOut() {
-    if (DEMO_MODE) return;
     auth.signOut().catch(e => console.error("Gagal logout:", e));
 }
 
@@ -323,8 +308,6 @@ function switchZone(i) {
     renderLogTable();
     setOnline(false);
     buildZoneSelect();
-    // Demo tidak punya RTDB per unit -> isi ulang data dummy agar tidak kosong.
-    if (DEMO_MODE) { loadDemoData(); return; }
     fetchDataLogs();
 }
 
@@ -361,7 +344,6 @@ async function apiRead(path) {
 }
 
 async function loadLabels() {
-    if (DEMO_MODE) return;
     try {
         const res = await fetch(await apiRead('labels.json'));
         if (!res.ok) return;
@@ -425,13 +407,11 @@ function showZoneMsg(text, ok = false) {
 // Nama unit ikut tampil di tombol gabungan, jadi segarkan setelah nama
 // berubah (ganti nama atau ganti unit).
 function setOnlineText() {
-    if (document.getElementById('zoneBtn').classList.contains('is-demo')) return;
     setOnline(!document.getElementById('zoneBtn').classList.contains('is-off'),
         Math.floor(Date.now() / 1000) - (lastData ? lastData.ts : 0));
 }
 
 async function sendLabel(value, id) {
-    if (DEMO_MODE) return true;
     if (!auth || !auth.currentUser) return false;   // tamu tidak boleh menulis
     try {
         const token = await auth.currentUser.getIdToken();
@@ -446,45 +426,6 @@ async function sendLabel(value, id) {
         console.error(e);
         return false;
     }
-}
-
-function loadDemoData() {
-    const now = Math.floor(Date.now() / 1000);
-    const logs = [];
-    const base = [
-        [29.1, 62, 38, 1.42, 5.2, 412, "Normal"],
-        [29.8, 58, 33, 1.58, 5.5, 438, "Normal MISTING"],
-        [30.4, 55, 30, 1.72, 5.8, 455, "Normal MISTING"],
-        [30.1, 59, 28, 1.66, 5.6, 470, "Normal BLOWER"],
-        [28.7, 66, 25, 1.35, 5.1, 488, "Normal IRIGASI"],
-        [27.9, 70, 41, 1.18, 4.9, 905, "Normal"],
-        [27.4, 74, 44, 1.04, 4.6, 940, "Normal"],
-        [26.8, 78, 47, 0.88, 4.3, 972, "Normal BLOWER"]
-    ];
-    base.forEach((b, i) => {
-        logs.push({
-            ts: now - (base.length - 1 - i) * 20,
-            temperature: b[0],
-            humidity: b[1],
-            soil: b[2],
-            vpd: b[3],
-            et0: b[4],
-            tds: b[5],
-            status_sistem: b[6],
-            manual_mode: false
-        });
-    });
-
-    lastData = logs[logs.length - 1];
-    renderLogs(logs);
-    updateActuatorStates();
-    updateFreshness(20);
-    // Identitas (avatar/nama/peran) sudah diatur oleh setIdentity() di atas —
-    // jangan ditimpa di sini, supaya demo konsisten dengan keadaan nyata.
-    const btn = document.getElementById('zoneBtn');
-    btn.classList.remove('is-off', 'is-ok', 'is-stale');
-    btn.classList.add('is-demo');
-    document.getElementById('zoneStatus').textContent = 'demo';
 }
 
 function renderLogs(data) {
@@ -568,7 +509,6 @@ function fmtLogTime(ts) {
 
 async function fetchDataLogs() {
     try {
-        if (DEMO_MODE) return;
         const path = `zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=${logLimit}`;
         const res = await fetch(await apiRead(path));
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -689,7 +629,7 @@ function applyLocalCommand(action, value) {
 async function sendCommand(action, value) {
     const status = document.getElementById('cmdStatus');
     // Tamu tidak punya UI kontrol, tapi tetap dijaga agar tidak bisa menulis.
-    if (!DEMO_MODE && (!auth || !auth.currentUser)) {
+    if (!auth || !auth.currentUser) {
         status.textContent = "Kamu sedang masuk sebagai tamu — login untuk kontrol";
         setTimeout(() => status.textContent = "", 4000);
         return;
@@ -699,13 +639,6 @@ async function sendCommand(action, value) {
     // checkbox seketika saat diklik; kalau teks menunggu balasan RTDB (ratusan
     // ms), switch dan tulisan ON/OFF terlihat bertentangan.
     applyLocalCommand(action, value);
-    if (DEMO_MODE) {
-        status.textContent = action === "auto"
-            ? "Demo: mode otomatis (semua kembalikan ke fuzzy)"
-            : "Demo: " + action + " " + (value ? "ON" : "OFF");
-        setTimeout(() => status.textContent = "", 4000);
-        return;
-    }
     try {
         const token = await auth.currentUser.getIdToken();
         const res = await fetch(`${DB_URL}/commands/${zoneId()}.json?auth=${token}`, {

@@ -158,11 +158,9 @@ body.nav-closed .shell { margin-left: 0; }
 .zone-btn.is-ok .zone-btn-icon { color: #a7f3d0; }
 .zone-btn.is-stale .zone-btn-icon { color: #fde68a; }
 .zone-btn.is-off .zone-btn-icon { color: #fecaca; }
-.zone-btn.is-demo .zone-btn-icon { color: #e5e7eb; }
 .zone-btn.is-ok .zone-status { color: #a7f3d0; }
 .zone-btn.is-stale .zone-status { color: #fde68a; }
 .zone-btn.is-off .zone-status { color: #fecaca; }
-.zone-btn.is-demo .zone-status { color: #e5e7eb; }
 .zone-menu {
     position: absolute;
     top: 42px; right: 0;
