@@ -9,22 +9,28 @@ Realtime Database.
 
 ![Dashboard](docs/dashboard.png)
 
-Layout admin: sidebar kiri (Beranda, Kontrol, Log Sensor) dan topbar biru.
+Layout admin: sidebar kiri (Beranda, Kontrol, Log Sensor) dan topbar biru solid.
 Tombol hamburger menyembunyikan/munculkan sidebar di desktop, dan menjadi
-drawer di layar kecil. Seluruh tampilan mengikuti satu skema warna yang
-didefinisikan di `style.css`; grafik membaca variabel warna yang sama.
+drawer di layar kecil. Greenhouse yang dipantau/dikontrol dipilih lewat tombol
+di topbar yang memunculkan daftar unit. Seluruh tampilan mengikuti satu skema
+warna (Material Blue berpusat di `#1565C0`) yang didefinisikan di `style.css`;
+grafik membaca variabel warna yang sama.
 
 **Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
 tanah, VPD, ET0, dan TDS) plus grafik tren 20 titik terakhir.
 
-**Kontrol** menampilkan kartu tiap aktuator (Misting, Irigasi, Blower, Auto)
-dengan status ON/OFF dan sakelarnya, hanya untuk admin.
+**Kontrol** menampilkan satu baris per aktuator (Misting, Irigasi, Blower,
+Auto) dengan status ON/OFF dan sakelarnya, hanya untuk admin.
 
-![Log sensor](docs/log-sensor.png)
+![Kontrol](docs/kontrol.png)
 
 **Log Sensor** menampilkan histori dalam tabel, lengkap dengan pilihan jumlah
 baris (10/20/50) dan pencarian. Tampilan menyesuaikan lebar layar, dari ponsel
 sampai monitor lebar.
+
+Menambah unit greenhouse = tambah baris di `ZONES` (`web/config.js`) dengan
+`id` yang sama dengan `DEVICE_ID` firmware, plus tambahkan UID perangkat itu ke
+allowlist rules RTDB.
 
 ## Hardware
 

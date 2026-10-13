@@ -1,28 +1,22 @@
-/* Satu skema warna untuk seluruh dashboard (CSS + grafik Chart.js membaca
-   variabel yang sama lewat getComputedStyle). Hanya warna bermakna yang
-   ber%: biru = aksen, hijau = aktif, kuning = peringatan, merah = mati/
-   bahaya. Everything else netral. */
+/* Palet warna: Material Blue berpusat di #1565C0 (Blue 800).
+   #0D47A1 (Blue 900) aksen gelap, #90CAF9 (Blue 200) sekunder/hover,
+   #E3F2FD (Blue 50) latar lembut, #212121 teks. Grafik Chart.js membaca
+   variabel yang sama lewat getComputedStyle. */
 :root {
-    --bg: #f4f6f8;
+    --bg: #f5f7fa;
     --card: #ffffff;
-    --card-2: #f7f9fb;
-    --border: #e3e8ee;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --accent: #2563eb;
-    --accent-dark: #1d4ed8;
-    --accent-soft: #eff6ff;
+    --card-2: #f5f8fd;
+    --border: #e1e8f5;
+    --text: #212121;
+    --muted: #616161;
+    --accent: #1565c0;
+    --accent-dark: #0d47a1;
+    --accent-light: #90caf9;
+    --accent-soft: #e3f2fd;
     --ok: #16a34a;
-    --ok-soft: #f0fdf4;
-    --warn: #b45309;
-    --warn-soft: #fffbeb;
     --danger: #dc2626;
     --danger-soft: #fef2f2;
-    --info: #0369a1;
-    --info-soft: #f0f9ff;
-    --header-1: #0f4c81;
-    --header-2: #1565c0;
-    --track: #cbd5e1;      /* switch mati */
+    --track: #bbdefb;      /* switch mati */
     --sidebar: 248px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -46,14 +40,16 @@ body {
     z-index: 30;
     transition: transform 0.22s ease;
 }
-/* Meneruskan pita biru topbar: blok brand + topbar jadi satu garis biru penuh.
-   Sidebar di bawahnya tetap putih supaya menu tetap kontras. */
+/* Brand: identitas aplikasi, terpisah dari burger (menu) dan judul halaman
+   supaya tidak terlihat "| menu" di sisi yang salah. */
 .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 16px 18px;
-    background: linear-gradient(135deg, var(--header-1) 0%, var(--header-2) 100%);
+    padding-right: 18px;
+    margin-right: 4px;
+    border-right: 1px solid rgba(255,255,255,.2);
+    flex-shrink: 0;
 }
 /* greenhouse.png = garis hitam pekat dengan alpha transparan (tanpa latar
    putih). WAJIB elemen kosong (bukan <img>): mask berlaku ke seluruh rendering
@@ -114,7 +110,7 @@ body.nav-closed .shell { margin-left: 0; }
     position: sticky;
     top: 0;
     z-index: 20;
-    background: linear-gradient(135deg, var(--header-1) 0%, var(--header-2) 100%);
+    background: var(--accent);
     color: #fff;
     padding: 0 22px;
     height: 62px;
@@ -136,35 +132,48 @@ body.nav-closed .shell { margin-left: 0; }
 .page-title { font-size: 17px; font-weight: 600; letter-spacing: .2px; color: #fff; }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 
-.zone-picker {
-    display: flex; align-items: center; gap: 2px;
+/* Pilih greenhouse: tombol tunggal; daftar unit muncul di popup di bawahnya. */
+.zone-picker { position: relative; }
+.zone-btn {
+    display: flex; align-items: center; gap: 7px;
     background: rgba(255,255,255,.14);
     border: 1px solid rgba(255,255,255,.22);
     border-radius: 999px;
-    padding: 2px 2px 2px 12px;
+    padding: 6px 12px;
+    color: #fff; font-family: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; max-width: 190px;
 }
-.zone-picker select {
-    background: transparent; border: none; outline: none;
-    color: #fff; font-size: 12px; font-weight: 600;
-    font-family: inherit; cursor: pointer;
-    padding: 4px 18px 4px 0;
-    max-width: 170px;
-    /* caret bawaan browser hampir tak terlihat di header biru -> panah sendiri */
-    appearance: none; -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right center;
-    background-size: 11px;
+.zone-btn:hover { background: rgba(255,255,255,.24); }
+.zone-btn span { overflow: hidden; text-overflow: ellipsis; }
+.zone-menu {
+    position: absolute;
+    top: 42px; right: 0;
+    width: 290px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(16,24,40,.18);
+    padding: 8px;
+    z-index: 40;
 }
-.zone-picker select option { color: #1f2937; background: #fff; }
-/* Hanya satu unit: select nonaktif, jadi panah disembunyikan. */
-.zone-picker select:disabled { cursor: default; padding-right: 2px; background-image: none; opacity: .95; }
-.btn.mini {
-    padding: 4px 7px; font-size: 12px; line-height: 1;
-    background: transparent; color: rgba(255,255,255,.85);
-    border: none; border-radius: 999px;
+.zone-menu-title {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--muted);
+    padding: 6px 8px 8px;
 }
-.btn.mini:hover { background: rgba(255,255,255,.18); color: #fff; }
+.zone-row {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 9px 10px;
+    background: none; border: none; border-radius: 8px;
+    font-family: inherit; text-align: left; cursor: pointer;
+    color: var(--text);
+}
+.zone-row:hover { background: var(--card-2); }
+.zone-row.active { background: var(--accent-soft); color: var(--accent-dark); }
+.zone-row .z-name { font-size: 13px; font-weight: 600; }
+.zone-row .z-id { font-size: 10.5px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.zone-row .z-check { margin-left: auto; color: var(--accent); flex-shrink: 0; }
+.zone-menu-hint { font-size: 11px; color: var(--muted); padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 6px; }
 
 .badge {
     display: flex; align-items: center; gap: 6px;
@@ -174,12 +183,13 @@ body.nav-closed .shell { margin-left: 0; }
     font-weight: 600;
     white-space: nowrap;
 }
-.badge.on { background: rgba(46,125,50,.9); border: 1px solid rgba(134,239,172,.35); color: #fff; }
-.badge.on svg { color: #bbf7d0; animation: pulse-dot 1.4s ease-in-out infinite; }
-.badge.off { background: rgba(220,38,38,.85); border: 1px solid rgba(252,165,165,.35); color: #fff; }
+/* Badge status di topbar biru: warna solid agar kontras, warna = makna. */
+.badge.on { background: var(--ok); border: 1px solid rgba(255,255,255,.25); color: #fff; }
+.badge.on svg { color: #dcfce7; animation: pulse-dot 1.4s ease-in-out infinite; }
+.badge.off { background: var(--danger); border: 1px solid rgba(255,255,255,.25); color: #fff; }
 .badge.off svg { color: #fecaca; }
-.badge.demo { background: rgba(100,116,139,.7); border: 1px solid rgba(255,255,255,.22); color: #fff; }
-.badge.demo svg { color: #cbd5e1; }
+.badge.demo { background: var(--muted); border: 1px solid rgba(255,255,255,.25); color: #fff; }
+.badge.demo svg { color: #e0e0e0; }
 @keyframes pulse-dot { 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
 
 .head-actions { display: flex; align-items: center; gap: 12px; }
@@ -268,7 +278,8 @@ body.nav-closed .shell { margin-left: 0; }
     box-shadow: 0 1px 2px rgba(16,24,40,.04);
 }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
-.card-head h2 { font-size: 15px; font-weight: 600; }
+.card-head h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.card-head h2 svg { color: var(--accent); flex-shrink: 0; }
 .card-head .note { font-size: 12px; color: var(--muted); }
 
 /* auto-fit: jumlah kolom mengikuti lebar sendiri. */
@@ -290,30 +301,31 @@ body.nav-closed .shell { margin-left: 0; }
 .chart-wrap { position: relative; height: 320px; }
 
 /* ============ KONTROL ============ */
-/* Padat: kartu尽量 ringkas supaya 4 aktuator muat satu baris di layar
-   menengah tanpa menggulir. */
-.ctrl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+/* Satu aktuator per baris: nama di kiri, status + sakelar di kanan. Padat dan
+   enak dipindai dibandingkan kartu yang menumpuk nama/status/sakelar. */
+.ctrl-grid { display: flex; flex-direction: column; gap: 8px; max-width: 620px; }
 .ctrl {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 12px 14px 14px;
+    padding: 10px 14px;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 7px;
+    gap: 12px;
 }
-.ctrl-head { display: flex; align-items: center; gap: 7px; color: var(--text); }
-.ctrl-head h3 { font-size: 13px; font-weight: 600; }
-.ctrl-head svg { color: var(--accent); width: 15px; height: 15px; }
-/* Status di tengah kartu, gaya "OFF"/"ON" pada referensi */
+.ctrl-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ctrl-head h3 { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.ctrl-head svg { color: var(--accent); flex-shrink: 0; }
+/* Status: OFF merah / ON hijau, tetap di tengah baris */
 .ctrl-state {
-    font-size: 16px;
+    margin-left: auto;
+    font-size: 13px;
     font-weight: 700;
     letter-spacing: .5px;
     color: var(--danger);
     text-transform: uppercase;
-    min-height: 20px;
+    min-width: 34px;
+    text-align: right;
 }
 .ctrl-state.on { color: var(--ok); }
 .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
@@ -326,7 +338,8 @@ body.nav-closed .shell { margin-left: 0; }
     transition: transform .2s;
     box-shadow: 0 1px 2px rgba(0,0,0,.25);
 }
-.switch input:checked + .slider { background: var(--ok); }
+/* Switch hidup memakai warna header, bukan hijau, agar satu warna aksen. */
+.switch input:checked + .slider { background: var(--accent-dark); }
 .switch input:checked + .slider::before { transform: translateX(18px); }
 .cmd-status { text-align: center; font-size: 12px; color: var(--muted); margin-top: 14px; min-height: 16px; }
 
@@ -344,7 +357,7 @@ body.nav-closed .shell { margin-left: 0; }
     background: var(--card); padding: 7px 12px;
     width: 230px; max-width: 100%; outline: none;
 }
-.search:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.12); }
+.search:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(21,101,192,.14); }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
@@ -363,9 +376,9 @@ tbody tr:hover { background: var(--accent-soft); }
 tbody td.num { color: var(--text); font-weight: 600; }
 .table-foot { font-size: 12px; color: var(--muted); margin-top: 12px; min-height: 16px; }
 .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-.pill.mist { background: var(--info-soft); color: var(--info); }
-.pill.blower { background: var(--warn-soft); color: var(--warn); }
-.pill.irigasi { background: var(--ok-soft); color: var(--ok); }
+/* Status aktuator dibedakan oleh isi teksnya (MISTING/BLOWER/IRIGASI), bukan
+   warna — semua status aktif memakai satu aksen agar tampilan tetap satu warna. */
+.pill.mist, .pill.blower, .pill.irigasi { background: var(--accent-soft); color: var(--accent-dark); }
 .pill.idle { background: var(--card-2); color: var(--muted); }
 
 .refresh {
@@ -394,7 +407,7 @@ tbody td.num { color: var(--text); font-weight: 600; }
     border: 1px solid var(--border); background: #fff; color: var(--text);
     font-size: 14px; outline: none; transition: border-color .15s;
 }
-.login-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.12); }
+.login-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(21,101,192,.14); }
 .btn.primary { background: var(--accent); color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
 .btn.primary:hover { background: var(--accent-dark); }
 .login-box .btn-login { width: 100%; margin-top: 20px; padding: 10px; font-size: 14px; }
@@ -418,10 +431,14 @@ tbody td.num { color: var(--text); font-weight: 600; }
     /* Nama greenhouse sudah tertulis di badge koneksi, jadi pil pemilih zona
        tidak perlu-duka space di layar sempit. */
     .zone-picker { display: none; }
+    /* Topbar sempit: teks brand disembunyikan (ikon greenhouse tetap), badge
+       dipotong elipsis supaya tidak menabrak avatar. */
+    .brand-text { display: none; }
+    .brand { padding-right: 12px; }
+    #onlineText { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
     .metric .value { font-size: 25px; }
     .card { padding: 16px; }
     .chart-wrap { height: 240px; }
-    .ctrl-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
     .search { width: 100%; }
 }
 @media (max-width: 420px) {
@@ -430,7 +447,6 @@ tbody td.num { color: var(--text); font-weight: 600; }
     .metric .label { font-size: 10px; }
     .metric .value { font-size: 21px; }
     .metric .value small { font-size: 11px; }
-    .ctrl-grid { grid-template-columns: 1fr; }
     .card-head { flex-direction: column; align-items: flex-start; gap: 8px; }
     .user-menu { min-width: 200px; }
     table { font-size: 12px; }

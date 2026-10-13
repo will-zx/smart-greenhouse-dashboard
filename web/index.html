@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Greenhouse Dashboard</title>
-    <link rel="stylesheet" href="style.css?v=21">
+    <link rel="stylesheet" href="style.css?v=23">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="config.js"></script>
 </head>
-<body>
+<body class="nav-closed">
 
     <div class="login-overlay" id="login">
         <div class="login-box">
@@ -31,10 +31,6 @@
 
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
-            <div class="brand">
-                <span class="brand-icon" aria-hidden="true"></span>
-                <span class="brand-text">SMART<br>GREENHOUSE</span>
-            </div>
             <nav class="nav">
                 <a href="#" class="nav-item active" data-view="beranda">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
@@ -58,11 +54,23 @@
                 <button class="burger" id="burger" aria-label="Buka menu" aria-expanded="false">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
                 </button>
+                <div class="brand">
+                    <span class="brand-icon" aria-hidden="true"></span>
+                    <span class="brand-text">SMART<br>GREENHOUSE</span>
+                </div>
                 <h1 class="page-title" id="pageTitle">Beranda</h1>
                 <div class="topbar-actions">
+                    <!-- Pilih greenhouse: satu tombol, isi daftar muncul di popup -->
                     <div class="zone-picker">
-                        <select id="zoneSelect" title="Pilih greenhouse"></select>
-                        <button class="btn mini" id="labelBtn" onclick="renameZone()" title="Ganti nama greenhouse">&#9998;</button>
+                        <button class="zone-btn" id="zoneBtn" aria-haspopup="true" aria-expanded="false">
+                            <span id="zoneBtnName">Greenhouse</span>
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                        <div class="zone-menu" id="zoneMenu" hidden>
+                            <p class="zone-menu-title">Pilih greenhouse</p>
+                            <div id="zoneList"></div>
+                            <p class="zone-menu-hint">Satu unit ESP32 per greenhouse. Data yang dipantau dan dikontrol mengikuti pilihan di atas.</p>
+                        </div>
                     </div>
                     <div class="badge on" id="onlineBadge">
                         <svg viewBox="0 0 10 10" width="8" height="8"><circle cx="5" cy="5" r="4" fill="currentColor"/></svg>
@@ -152,7 +160,10 @@
                 <section class="view hidden" id="view-kontrol">
                     <div class="card" id="ctrlCard">
                         <div class="card-head">
-                            <h2>Kontrol Aktuator</h2>
+                            <h2>
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                                Kontrol Aktuator
+                            </h2>
                             <span class="note">Kontrol remot via Firebase RTDB</span>
                         </div>
                         <div class="ctrl-grid">
@@ -209,7 +220,10 @@
                 <section class="view hidden" id="view-log">
                     <div class="card">
                         <div class="card-head">
-                            <h2>Histori Data Log Sensor</h2>
+                            <h2>
+                            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                            Histori Data Log Sensor
+                        </h2>
                             <div class="head-actions">
                                 <span class="note" id="zoneCount"></span>
                                 <button class="refresh" onclick="fetchDataLogs()">
@@ -256,7 +270,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=15"></script>
+    <script src="app.js?v=16"></script>
 
     <!--
       SETUP WAJIB:

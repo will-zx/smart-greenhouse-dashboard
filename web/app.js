@@ -74,9 +74,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('click', () => {
         menu.hidden = true;
         chip.setAttribute('aria-expanded', 'false');
+        closeZoneMenu();
     });
     document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') menu.hidden = true;
+        if (e.key === 'Escape') { menu.hidden = true; closeZoneMenu(); }
     });
 });
 
@@ -156,7 +157,6 @@ function zoneName() {
 function applyRole(email) {
     isAdmin = (email === ADMIN_EMAIL);
     document.getElementById('ctrlCard').classList.toggle('hidden', !isAdmin);
-    document.getElementById('labelBtn').classList.toggle('hidden', !isAdmin);
     const badge = document.getElementById('roleBadge');
     badge.textContent = isAdmin ? 'Admin' : 'Mode lihat';
     badge.classList.toggle('admin', isAdmin);
@@ -207,45 +207,69 @@ function startDashboard() {
     });
 }
 
+// Daftar unit greenhouse di dalam popup. Satu unit ESP32 = satu baris;
+// memilih baris menukar seluruh data yang dipantau & dikontrol.
 function buildZoneSelect() {
-    const sel = document.getElementById('zoneSelect');
-    sel.innerHTML = '';
+    document.getElementById('zoneBtnName').textContent = zoneName();
+    const list = document.getElementById('zoneList');
+    list.innerHTML = '';
     ZONES.forEach((z, i) => {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.textContent = labels[z.id] || z.name;
-        sel.appendChild(opt);
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'zone-row' + (i === currentZone ? ' active' : '');
+        row.innerHTML = `
+            <span>
+                <span class="z-name"></span>
+                <span class="z-id"></span>
+            </span>
+            ${i === currentZone ? '<svg class="z-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' : ''}`;
+        row.querySelector('.z-name').textContent = labels[z.id] || z.name;
+        row.querySelector('.z-id').textContent = z.id;
+        row.addEventListener('click', () => { switchZone(i); closeZoneMenu(); });
+        list.appendChild(row);
     });
-    sel.value = currentZone;
-    // Device id pindah ke title: informasinya tetap ada tanpa memakan lebar header.
-    sel.title = 'Perangkat: ' + zoneId() + ' — pilih greenhouse';
     document.getElementById('zoneCount').textContent =
         ZONES.length > 1 ? ZONES.length + ' greenhouse' : '';
-    // Satu unit saja -> tidak ada yang bisa dipilih, jadi select-nya dinonaktifkan
-    // (nama greenhouse tetap terbaca) alih-alih disembunyikan.
-    sel.disabled = ZONES.length < 2;
 }
 
-// Handler dipasang sekali, bukan di dalam buildZoneSelect() yang dipanggil
-// ulang setiap label termuat (menumpuknya assignment tidak merusak, tapi
-// penempatan yang salah mudah terjadi bila logika approve-nya bertambah).
+function switchZone(i) {
+    if (i === currentZone) return;
+    currentZone = i;
+    lastData = null;
+    optimistic = null;
+    // Buang sisa data greenhouse sebelumnya supaya tabel/grafik tidak sempat
+    // menampilkan unit lama selagi data yang baru dimuat.
+    logData = [];
+    logFilter = '';
+    document.getElementById('logSearch').value = '';
+    sensorChart.data.labels = [];
+    sensorChart.data.datasets.forEach(d => d.data = []);
+    sensorChart.update();
+    renderLogTable();
+    setOnline(false);
+    buildZoneSelect();
+    fetchDataLogs();
+}
+
+function openZoneMenu() {
+    const m = document.getElementById('zoneMenu');
+    m.hidden = false;
+    document.getElementById('zoneBtn').setAttribute('aria-expanded', 'true');
+}
+
+function closeZoneMenu() {
+    document.getElementById('zoneMenu').hidden = true;
+    document.getElementById('zoneBtn').setAttribute('aria-expanded', 'false');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('zoneSelect').addEventListener('change', e => {
-        currentZone = parseInt(e.target.value, 10) || 0;
-        lastData = null;
-        optimistic = null;
-        // Buang sisa data zona sebelumnya supaya tabel/grafik tidak sempat
-        // menampilkan Greenhouse lama selagi data baru dimuat.
-        logData = [];
-        logFilter = '';
-        document.getElementById('logSearch').value = '';
-        sensorChart.data.labels = [];
-        sensorChart.data.datasets.forEach(d => d.data = []);
-        sensorChart.update();
-        renderLogTable();
-        setOnline(false);
-        fetchDataLogs();
+    document.getElementById('zoneBtn').addEventListener('click', e => {
+        e.stopPropagation();
+        const m = document.getElementById('zoneMenu');
+        if (m.hidden) openZoneMenu(); else closeZoneMenu();
     });
+    // Klik di luar popup menutupnya (sudah ditangani listener global di bawah).
+    document.getElementById('zoneMenu').addEventListener('click', e => e.stopPropagation());
 });
 
 async function loadLabels() {
@@ -261,20 +285,27 @@ async function loadLabels() {
 }
 
 function renameZone() {
-    if (DEMO_MODE) {
-        const n = prompt('Nama greenhouse', zoneName());
-        if (n) { labels[zoneId()] = n.trim(); buildZoneSelect(); }
-        return;
-    }
     const n = prompt('Nama greenhouse untuk ' + zoneId() + ':', zoneName());
     if (!n) return;
     const val = n.trim();
+    if (!val) return;
     const status = document.getElementById('cmdStatus');
     sendLabel(val).then(ok => {
-        if (!ok) { status.textContent = "Gagal menyimpan nama: akses ditolak"; }
-        else { labels[zoneId()] = val; buildZoneSelect(); }
+        if (!ok) status.textContent = "Gagal menyimpan nama: akses ditolak";
+        else labels[zoneId()] = val;
+        buildZoneSelect();
+        setOnlineText();
         setTimeout(() => status.textContent = "", 4000);
     });
+}
+
+// Badge koneksi ikut memuat nama greenhouse, jadi harus disegarkan setiap
+// nama berubah (setelah ganti nama atau ganti unit).
+function setOnlineText() {
+    if (document.getElementById('onlineBadge').classList.contains('demo')) return;
+    const text = document.getElementById('onlineText');
+    if (text.textContent.includes('offline')) text.textContent = zoneName() + ' offline';
+    else text.textContent = zoneName() + ' online · ' + new Date().toLocaleTimeString('id-ID');
 }
 
 async function sendLabel(value) {
