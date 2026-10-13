@@ -141,14 +141,24 @@ body.nav-closed .shell { margin-left: 0; }
     border-radius: 999px;
     padding: 6px 12px;
     color: #fff; font-family: inherit; font-size: 12px; font-weight: 600;
-    cursor: pointer; white-space: nowrap; max-width: 190px;
+    cursor: pointer; white-space: nowrap; max-width: 270px;
 }
 .zone-btn:hover { background: rgba(255,255,255,.24); }
+/* Nama unit boleh dipotong, status tidak — status adalah informasi yang
+   selalu harus terbaca utuh. */
 .zone-btn span { overflow: hidden; text-overflow: ellipsis; }
+#zoneBtnName { flex: 0 1 auto; min-width: 0; }
+.zone-btn .zone-sep, .zone-btn .zone-status { flex: 0 0 auto; }
 .zone-btn-icon { display: none; flex-shrink: 0; }
 /* Status menyatu di tombol yang sama; pill tetap netral, hanya teks status
    yang berubah warna sesuai kondisi. */
 .zone-sep, .zone-status { color: rgba(255,255,255,.8); }
+/* Ikon ikut mewarnai diri sesuai status, supaya tetap terbaca walau teksnya
+  sangat pendek (mis. di ponsel). */
+.zone-btn.is-ok .zone-btn-icon { color: #a7f3d0; }
+.zone-btn.is-stale .zone-btn-icon { color: #fde68a; }
+.zone-btn.is-off .zone-btn-icon { color: #fecaca; }
+.zone-btn.is-demo .zone-btn-icon { color: #e5e7eb; }
 .zone-btn.is-ok .zone-status { color: #a7f3d0; }
 .zone-btn.is-stale .zone-status { color: #fde68a; }
 .zone-btn.is-off .zone-status { color: #fecaca; }
@@ -329,6 +339,10 @@ body.nav-closed .shell { margin-left: 0; }
 .chart-wrap { position: relative; height: 320px; }
 
 /* ============ KONTROL ============ */
+/* Kartu hugs konten: tanpa batas lebar, area kanan kartu kosong besar karena
+   barisnya hanya ~620px.Lebar 680px = snug dengan isi, dan di mode hanya-lihat
+   (sakelar disembunyikan) ruang kosongnya makin tak terlihat. */
+#ctrlCard { max-width: 680px; }
 /* Satu aktuator per baris: nama di kiri, status + sakelar di kanan. Padat dan
    enak dipindai dibandingkan kartu yang menumpuk nama/status/sakelar. */
 .ctrl-grid { display: flex; flex-direction: column; gap: 8px; max-width: 620px; }
@@ -484,8 +498,12 @@ tbody td.num { color: var(--text); font-weight: 600; }
        yang disembunyikan, diganti ikon greenhouse + panah. Nama unitnya sendiri
        sudah tertulis di badge koneksi dan di header kartu. */
     .zone-btn-icon { display: block; }
-    .zone-btn > span { display: none; }
     .zone-btn { padding: 6px 10px; }
+    /* Di layar sempit nama unit disembunyikan, TAPI statusnya tetap tampil —
+      =status inilah yang paling berguna, dan tanpa teks warna ikon saja
+       tidak terbaca. */
+    #zoneBtnName, .zone-sep { display: none; }
+    .zone-status { font-size: 11px; }
     /* Menu tetap di kanan tombol (tombol berada di ujung kanan topbar), hanya
        lebarnya yang dibatasi viewport supaya tidak keluar layar. */
     .zone-menu { width: min(290px, calc(100vw - 24px)); }
