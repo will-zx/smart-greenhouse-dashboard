@@ -117,11 +117,15 @@ body {
    peringatan, hijau ON, merah OFF); hijau dan merah digelapkan sedikit karena
    teks putih di atasnya jadi lemah kalau warnanya terlalu terang.
 
+   Hijau #2e7d32 (bukan #3f9c44): rasio kontras teks putih 5.13:1, di atas
+   ambang WCAG AA 4.5:1 untuk teks kecil - #3f9c44 hanya 3.47:1. Merah
+   #d5372f 4.75:1 dan kuning #e8e91b 12.84:1 sudah memenuhi.
+
    Isian sengaja ditulis ulang untuk :hover dan :active juga. Kalau hanya
    mengandalkan urutan aturan, begitu pill disorot atau ditekan isiannya
    hilang - lebih jauh, `background: inherit` membuat pill mewarisi latar
    induknya yang transparan, jadi warna benar-benar lenyap saat itu. */
-.zone-btn.is-ok, .zone-btn.is-ok:hover, .zone-btn.is-ok:active { background: #3f9c44; color: #fff; border-color: transparent; }
+.zone-btn.is-ok, .zone-btn.is-ok:hover, .zone-btn.is-ok:active { background: #2e7d32; color: #fff; border-color: transparent; }
 .zone-btn.is-stale, .zone-btn.is-stale:hover, .zone-btn.is-stale:active { background: #e8e91b; color: #1f1f00; border-color: transparent; }
 .zone-btn.is-off, .zone-btn.is-off:hover, .zone-btn.is-off:active { background: #d5372f; color: #fff; border-color: transparent; }
 /* Efek hover dan aktif sengaja hanya gelapkan isian sedikit, tanpa cincin. */
@@ -483,8 +487,8 @@ tbody td.num { color: var(--text); font-weight: 600; }
     .user-id { display: none; }
     .topbar-actions { gap: 8px; }
     /* Pemilih greenhouse TETAP ada di handphone (dulu disembunyikan, akibatnya
-       tidak ada cara berganti unit di layar kecil). Nama unitnya tetap ditulis,
-       karena sekarang warna status menempel pada nama itu. */
+       tidak ada cara berganti unit di layar kecil). Isi pillnya cuma umur data
+       ("2 hari 17 jam") - nama unitnya ada di judul kartu dan di popup daftar. */
     .zone-btn { padding: 6px 10px; }
     /* Topbar sempit: tombol Log Sensor jadi ikon saja, supaya brand, unit, dan
        avatar tetap muat di 360px. */

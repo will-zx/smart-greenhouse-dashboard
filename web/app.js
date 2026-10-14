@@ -516,9 +516,12 @@ async function fetchDataLogs() {
         const obj = await res.json();
         if (!obj) throw new Error('kosong');
 
-        const data = Object.entries(obj)
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([, v]) => v);
+        // Urut berdasarkan ts, bukan kunci push-ID. Kunci RTDB urut saat apa yang
+        // ditulis, tapi record lama yang diputar ulang dari backlog MicroSD tetap
+        // dapat kunci baru - jadi kunci != waktu. Ternsorted ts juga membetulkan
+        // kolom waktu di tabel (terbaru di atas) dan sumbu X grafik.
+        const data = Object.values(obj)
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0));
 
         lastData = data[data.length - 1];
         if (!lastData) throw new Error('kosong');
