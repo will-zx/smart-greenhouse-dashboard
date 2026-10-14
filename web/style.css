@@ -13,8 +13,9 @@
     --accent-dark: #0d47a1;
     --accent-light: #90caf9;
     --accent-soft: #e3f2fd;
-    --ok: #16a34a;
-    --danger: #dc2626;
+    --ok: #388e3c;          /* hijau keluarga "ON" dari referensi, digelapkan
+                           sedikit supaya teksnya tetap terbaca di kartu putih */
+    --danger: #e53935;      /* merah "OFF" dari referensi */
     --danger-soft: #fef2f2;
     --track: #bbdefb;      /* switch mati */
 }
@@ -99,26 +100,34 @@ body {
     color: #fff; font-family: inherit; font-size: 12px; font-weight: 600;
     cursor: pointer; white-space: nowrap; max-width: 270px; min-width: 0;
 }
-.zone-btn:hover { background: rgba(255,255,255,.24); }
-/* Nama unit boleh dipotong duluan. Status juga boleh menyusut (ellipsis), tapi
-   hanya sebagai upaya terakhir di layar sempit — branding dan chevron tidak
-   boleh terpotong, dan teks statusnya tetap terbaca utuh di layar normal. */
+/* Hover hanya untuk perangkat yang benar-benar punya kursor. Tanpa pembungkus
+   ini, :hover di HP tetap "nempel" setelah tap dan lapisan putih di atas ikut
+   tertinggal, sehingga pill status yang berwarna jadi terlihat kusam. */
+@media (hover: hover) { .zone-btn:hover { background: rgba(255,255,255,.24); } }
+/* Hilangkan overlay biru muda bawaan Chrome saat tombol di topbar ditekan. */
+.topbar button { -webkit-tap-highlight-color: transparent; }
+/* Isi pill hanya kapan data terakhir masuk ("2 jam 5 menit"), tanpa nama unit:
+   nama ada di chip header kartu grafik dan di popup daftar unit. */
 .zone-btn span { overflow: hidden; text-overflow: ellipsis; }
-#zoneBtnName { flex: 0 1 auto; min-width: 0; }
-.zone-btn .zone-sep { flex: 0 0 auto; }
 .zone-btn .zone-status { flex: 0 1 auto; min-width: 0; }
-.zone-btn-icon { display: none; flex-shrink: 0; }
-/* Status menyatu di tombol yang sama; pill tetap netral, hanya teks status
-   yang berubah warna sesuai kondisi. */
-.zone-sep, .zone-status { color: rgba(255,255,255,.8); }
-/* Ikon ikut mewarnai diri sesuai status, supaya tetap terbaca walau teksnya
-  sangat pendek (mis. di ponsel). */
-.zone-btn.is-ok .zone-btn-icon { color: #a7f3d0; }
-.zone-btn.is-stale .zone-btn-icon { color: #fde68a; }
-.zone-btn.is-off .zone-btn-icon { color: #fecaca; }
-.zone-btn.is-ok .zone-status { color: #a7f3d0; }
-.zone-btn.is-stale .zone-status { color: #fde68a; }
-.zone-btn.is-off .zone-status { color: #fecaca; }
+.zone-btn-icon { flex-shrink: 0; }
+/* Status ditandai lewat WARNA ISI pill, bukan cuma teks: hijau = data segar,
+   kuning = basi kurang dari sehari, merah = basi lebih dari sehari atau gagal
+   membaca data. Warna isinya mengikuti warna referensi (kuning segitiga
+   peringatan, hijau ON, merah OFF); hijau dan merah digelapkan sedikit karena
+   teks putih di atasnya jadi lemah kalau warnanya terlalu terang.
+
+   Isian sengaja ditulis ulang untuk :hover dan :active juga. Kalau hanya
+   mengandalkan urutan aturan, begitu pill disorot atau ditekan isiannya
+   hilang - lebih jauh, `background: inherit` membuat pill mewarisi latar
+   induknya yang transparan, jadi warna benar-benar lenyap saat itu. */
+.zone-btn.is-ok, .zone-btn.is-ok:hover, .zone-btn.is-ok:active { background: #3f9c44; color: #fff; border-color: transparent; }
+.zone-btn.is-stale, .zone-btn.is-stale:hover, .zone-btn.is-stale:active { background: #e8e91b; color: #1f1f00; border-color: transparent; }
+.zone-btn.is-off, .zone-btn.is-off:hover, .zone-btn.is-off:active { background: #d5372f; color: #fff; border-color: transparent; }
+/* Efek hover dan aktif sengaja hanya gelapkan isian sedikit, tanpa cincin. */
+.zone-btn.is-ok:hover, .zone-btn.is-ok:active,
+.zone-btn.is-stale:hover, .zone-btn.is-stale:active,
+.zone-btn.is-off:hover, .zone-btn.is-off:active { filter: brightness(.92); }
 .zone-menu {
     position: absolute;
     top: 42px; right: 0;
@@ -173,17 +182,9 @@ body {
 /* margin-left:auto tetap 담당 kalau .head-actions sempat wrap ke baris
    sendiri di layar sempit — tetap di ujung kanan, bukan jatuh ke kiri. */
 .head-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-.zone-tag {
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent-dark);
-    font-weight: 600;
-    white-space: nowrap;
-    max-width: 150px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
+/* Nama greenhouse yang dipantau menyambung di judul card, jadi tidak butuh
+   chip lagi. Warnanya abu-abu supaya judul tetap yang utama. */
+.head-zone { color: var(--muted); font-weight: 500; }
 
 /* ============ USER MENU ============ */
 .header-user { position: relative; }
@@ -199,12 +200,14 @@ body {
     font-family: inherit;
     text-align: left;
 }
-/* Hover tidak pakai isian putih transparan: teks di dalam chip sudah putih,
-   latar putih transparan membuat "Super Admin" bertabrakan dengan cardnya.
-   Cukup cincin tipis di sekeliling. */
-.user-chip:hover, .user-chip:active { background: none; box-shadow: 0 0 0 2px rgba(255,255,255,.28); }
-.user-chip:focus { outline: none; }
-.user-chip:focus-visible { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; }
+/* Hover tidak memakai isian atau cincin apa pun: cincin putih di sekeliling
+   chip avatar+gmail terasa mengganggu karena bersinggungan dengan isi topbar. */
+.user-chip:hover, .user-chip:active { background: none; box-shadow: none; }
+/* Semua tombol topbar (Log Sensor, pill greenhouse, akun): outline bawaan
+   browser setelah diklik hilang, tapi cincin untuk navigasi keyboard tetap
+   ada - inilah satu-satunya petunjuk fokus untuk pengguna keyboard. */
+.topbar button:focus { outline: none; }
+.topbar button:focus-visible { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; }
 .user-id { display: flex; flex-direction: column; line-height: 1.25; }
 .user-id b { font-size: 12px; font-weight: 700; color: #fff; }
 .user-id small { font-size: 10.5px; color: rgba(255,255,255,.75); }
@@ -356,7 +359,11 @@ body.read-only .switch { display: none; }
 /* Switch hidup memakai warna header, bukan hijau, agar satu warna aksen. */
 .switch input:checked + .slider { background: var(--accent-dark); }
 .switch input:checked + .slider::before { transform: translateX(18px); }
-.cmd-status { text-align: center; font-size: 12px; color: var(--accent-dark); font-weight: 600; margin-top: 14px; min-height: 16px; }
+/* Pesan status aktuator ("Perintah mist terkirim ...") sengaja tidak diberi
+   warna sendiri: ia satu jenis keterangan, sama seperti "Data terakhir ..."
+   di bawah grafik, jadi warna Abu-abunya sama. Warna hanya untuk hal yang
+   perlu dibedakan cepat: ON/OFF aktuator dan status koneksi greenhouse. */
+.cmd-status { text-align: center; font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 12px; min-height: 14px; }
 
 /* ============ TABEL ============ */
 .table-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -374,6 +381,21 @@ body.read-only .switch { display: none; }
 }
 .search:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(21,101,192,.14); }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Kolom waktu menempel di kiri saat tabel digeser mendatar di ponsel, jadi
+   konteks tiap baris tidak ikut hilang. Sel sticky tidak boleh transparan,
+   maka latar khususkasus ini diambil dari warna yang sama dengan kolom lain. */
+.table-wrap thead th:first-child,
+.table-wrap tbody td:first-child {
+    position: sticky;
+    left: 0;
+    /* Garis tipis di tepi kanan penanda kolom ini tidak ikut bergeser. */
+    box-shadow: 1px 0 0 var(--border);
+}
+.table-wrap thead th:first-child { z-index: 2; background: var(--card-2); }
+.table-wrap tbody td:first-child { z-index: 1; background: var(--card); }
+/* Isiannya harus ikut warna baris saat kursor berada di atasnya, kalau tidak
+   kolom waktu terlihat lepas dari barisnya sendiri. */
+.table-wrap tbody tr:hover td:first-child { background: var(--accent-soft); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
     text-align: left;
@@ -461,20 +483,13 @@ tbody td.num { color: var(--text); font-weight: 600; }
     .user-id { display: none; }
     .topbar-actions { gap: 8px; }
     /* Pemilih greenhouse TETAP ada di handphone (dulu disembunyikan, akibatnya
-       tidak ada cara berganti unit di layar kecil). Di sini hanya teks namanya
-       yang disembunyikan, diganti ikon greenhouse + panah. Nama unitnya sendiri
-       sudah tertulis di badge koneksi dan di header kartu. */
-    .zone-btn-icon { display: block; }
+       tidak ada cara berganti unit di layar kecil). Nama unitnya tetap ditulis,
+       karena sekarang warna status menempel pada nama itu. */
     .zone-btn { padding: 6px 10px; }
     /* Topbar sempit: tombol Log Sensor jadi ikon saja, supaya brand, unit, dan
        avatar tetap muat di 360px. */
     .log-btn span { display: none; }
     .log-btn { padding: 6px 10px; }
-    /* Di layar sempit nama unit disembunyikan, TAPI statusnya tetap tampil —
-      =status inilah yang paling berguna, dan tanpa teks warna ikon saja
-       tidak terbaca. */
-    #zoneBtnName, .zone-sep { display: none; }
-    .zone-status { font-size: 11px; }
     /* Menu tetap di kanan tombol (tombol berada di ujung kanan topbar), hanya
        lebarnya yang dibatasi viewport supaya tidak keluar layar. */
     .zone-menu { width: min(290px, calc(100vw - 24px)); }

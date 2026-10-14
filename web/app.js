@@ -208,21 +208,53 @@ const sensorChart = new Chart(document.getElementById('sensorChart').getContext(
     data: {
         labels: [],
         datasets: [
-            { label: 'Suhu (°C)', data: [], borderColor: cssVar('--danger'), backgroundColor: 'rgba(220,38,38,0.08)', pointRadius: 2, tension: 0.3, yAxisID: 'y' },
-            { label: 'Kelembapan (%)', data: [], borderColor: cssVar('--accent'), backgroundColor: 'rgba(37,99,235,0.08)', pointRadius: 2, tension: 0.3, yAxisID: 'y1' }
+            { label: 'Suhu (°C)', data: [], borderColor: cssVar('--danger'), pointBackgroundColor: cssVar('--danger'), pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0, yAxisID: 'y' },
+            { label: 'Kelembapan (%)', data: [], borderColor: cssVar('--accent'), pointBackgroundColor: cssVar('--accent'), pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0, yAxisID: 'y1' }
         ]
     },
     options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
+        // Legenda diletakkan di bawah-tengah seperti grafik referensi: lebih
+        // rapi dan tidak memakan ruang di dekat judul kartu.
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 7, boxHeight: 7, padding: 18, font: { weight: 600 } }
+            },
+            tooltip: {
+                padding: 10, boxWidth: 8, boxHeight: 8, usePointStyle: true,
+                callbacks: {
+                    // Sumbu X sudah menunjuk waktunya, jadi cukup tampilkan
+                    // "label + nilai + satuan" - tidak perlu mengulang label.
+                    label: c => ' ' + c.dataset.label.replace(/\s*\(.*\)/, '') + ': ' +
+                        c.parsed.y.toFixed(2) + ' ' + (c.dataset.yAxisID === 'y' ? '°C' : '%')
+                }
+            }
+        },
         scales: {
             // suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
             // garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
             // seperti lonjakan besar.
-            x: { grid: { color: cssVar('--card-2') }, ticks: { color: cssVar('--muted'), maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 } },
-            y: { type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40, grid: { color: cssVar('--card-2') }, ticks: { color: cssVar('--muted') }, title: { display: true, text: 'Suhu (°C)', color: cssVar('--danger'), font: { weight: 600 } } },
-            y1: { type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100, grid: { drawOnChartArea: false }, ticks: { color: cssVar('--muted') }, title: { display: true, text: 'Kelembapan (%)', color: cssVar('--accent'), font: { weight: 600 } } }
+            x: {
+                grid: { color: cssVar('--card-2') },
+                ticks: { color: cssVar('--muted'), maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 }
+            },
+            y: {
+                type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40,
+                grid: { color: cssVar('--card-2') },
+                border: { display: false },
+                ticks: { color: cssVar('--danger'), maxTicksLimit: 6 },
+                title: { display: true, text: 'Suhu (°C)', color: cssVar('--danger'), font: { weight: 600 } }
+            },
+            y1: {
+                type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100,
+                grid: { drawOnChartArea: false },
+                border: { display: false },
+                ticks: { color: cssVar('--accent'), maxTicksLimit: 6 },
+                title: { display: true, text: 'Kelembapan (%)', color: cssVar('--accent'), font: { weight: 600 } }
+            }
         }
     }
 });
@@ -244,7 +276,6 @@ function startDashboard() {
 // Daftar unit greenhouse di dalam popup. Satu unit ESP32 = satu baris;
 // memilih baris menukar seluruh data yang dipantau & dikontrol.
 function buildZoneSelect() {
-    document.getElementById('zoneBtnName').textContent = zoneName();
     const list = document.getElementById('zoneList');
     list.innerHTML = '';
     ZONES.forEach((z, i) => {
@@ -268,8 +299,9 @@ function buildZoneSelect() {
         list.appendChild(row);
     });
     // Nama unit yang sedang dipantau, supaya jelas data di halaman ini milik
-    // greenhouse yang mana (bukan jumlah unit). Muncul di header Beranda & Log.
-    document.querySelectorAll('.zone-tag').forEach(el => el.textContent = zoneName());
+    // greenhouse yang mana (bukan jumlah unit). Namesaknya menyambung di judul
+    // card: "Grafik Tren Sensor Lombok", bukan chip terpisah.
+    document.querySelectorAll('.head-zone').forEach(el => el.textContent = zoneName());
 }
 
 function switchZone(i) {
@@ -310,7 +342,11 @@ async function apiRead(path) {
     try {
         if (auth && auth.currentUser) token = await auth.currentUser.getIdToken();
     } catch (e) { /* tamu: lanjut tanpa token */ }
-    return `${DB_URL}/${path}${token ? '?auth=' + token : ''}`;
+    // Path boleh sudah membawa query string sendiri (mis. sensor_logs.json
+    // ?orderBy=...&limitToLast=...), jadi token harus ditempel dengan '&' kalau
+    // sudah ada '?'. Kalau salah pakai '?', limitToLast dapat "20?auth=..." dan
+    // RTDB membalas 400 "limitToLast must be an integer".
+    return `${DB_URL}/${path}${token ? (path.includes('?') ? '&' : '?') + 'auth=' + token : ''}`;
 }
 
 async function loadLabels() {
@@ -459,12 +495,17 @@ function fmtClock(ts) {
     if (typeof ts !== 'number' || ts < 100000) return '-';
     // Detik ikut karena ESP32 push tiap ~20 s: tanpa ini dua titik berdekatan
     // sering jatuh di menit yang sama dan label sumbu X terulang.
-    return new Date(ts * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // Format id-ID memakai titik ("18.26.15"); di sumbu grafik titik dua lebih
+    // mudah dibaca sebagai pemisah waktu.
+    return new Date(ts * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');
 }
 
 function fmtLogTime(ts) {
     if (typeof ts !== 'number' || ts < 100000) return '-';
-    return new Date(ts * 1000).toLocaleString('id-ID');
+    // Format id-ID menulis waktu dengan titik ("11/10/2026 18.26.15"); bagian
+    // jamnya diubah ke titik dua supaya sama dengan label sumbu grafik.
+    return new Date(ts * 1000).toLocaleString('id-ID')
+        .replace(/(\d{2})\.(\d{2})\.(\d{2})\s*$/, '$1:$2:$3');
 }
 
 async function fetchDataLogs() {
@@ -512,14 +553,27 @@ async function fetchDataLogs() {
     }
 }
 
+// Umur data dalam bahasa sehari-hari: detik → menit → jam → hari, dengan sisa
+// unit yang lebih kecil ("2 hari 15 jam"). Satu fungsi supaya label "diam ..."
+// di topbar dan "Data terakhir ..." di grafik tidak pernah beda format.
+// Floor, bukan round: 1439 menit harus tetap "23 jam 59 menit", bukan "24 jam".
+function humanAge(sec) {
+    if (sec < 60) return sec + " detik";
+    const m = Math.floor(sec / 60);
+    if (m < 60) return m + " menit";
+    const sisaM = m % 60;
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + (sisaM ? " jam " + sisaM + " menit" : " jam");
+    const sisaH = h % 24;
+    return Math.floor(h / 24) + " hari" + (sisaH ? " " + sisaH + " jam" : "");
+}
+
 // Umur data terakhir di bawah grafik: pengguna bisa membedakan "sensor diam
 // 40 detik" dari "dashboardnya yang macet".
 function updateFreshness(age) {
     const el = document.getElementById('freshness');
     if (typeof age !== 'number') { el.textContent = ''; return; }
-    el.textContent = age < 60
-        ? "Data terakhir " + age + " detik lalu"
-        : "Data terakhir " + Math.round(age / 60) + " menit lalu";
+    el.textContent = "Data terakhir " + humanAge(age) + " lalu";
 }
 
 function updateActuatorStates() {
@@ -545,22 +599,35 @@ function setCtrlState(key, on) {
     el.classList.toggle('on', !!on);
 }
 
-// Status koneksi menulis ke tombol gabungan (nama unit + status dalam satu
-// pill). Nama unit sendiri sudah tampil di depan, jadi di sini hanya status.
-function setOnline(ok, age) {
+// Isi pill greenhouse hanya kapan data terakhir masuk ("2 jam 5 menit"),
+// tanpa nama unit. Status ditandai warna: hijau = segar, kuning = basi kurang
+// dari sehari, merah = basi lebih dari sehari atau gagal membaca data. Teks
+// lengkapnya juga ditulis ke title + aria-label supaya hover dan pembaca layar
+// bisa membacanya. Durasi yang sama tertera di bawah grafik.
+function setOnline(ok, age = 0) {
     const btn = document.getElementById('zoneBtn');
     const text = document.getElementById('zoneStatus');
-    btn.classList.remove('is-ok', 'is-off', 'is-stale');
+    btn.classList.remove('is-ok', 'is-stale', 'is-off');
+    let ket;
     if (!ok) {
         btn.classList.add('is-off');
-        text.textContent = 'offline';
-    } else if (typeof age === 'number' && age > 60) {
+        text.textContent = 'gagal baca';
+        ket = 'Gagal membaca data greenhouse';
+    } else if (age > 86400) {
+        btn.classList.add('is-off');
+        text.textContent = humanAge(age);
+        ket = 'Data terakhir masuk ' + humanAge(age) + ' lalu';
+    } else if (age > 60) {
         btn.classList.add('is-stale');
-        text.textContent = 'diam ' + Math.round(age / 60) + ' mnt';
+        text.textContent = humanAge(age);
+        ket = 'Data terakhir masuk ' + humanAge(age) + ' lalu';
     } else {
         btn.classList.add('is-ok');
-        text.textContent = 'online';
+        text.textContent = humanAge(age);
+        ket = 'Data terbaru ' + humanAge(age) + ' lalu';
     }
+    btn.title = ket;
+    btn.setAttribute('aria-label', ket);
 }
 
 // Terapkan perintah ke tampilan segera. Sumber kebenaran tetap perangkat;
