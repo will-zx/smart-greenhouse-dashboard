@@ -10,27 +10,33 @@ Realtime Database.
 ![Dashboard](docs/dashboard.png)
 
 Layout: satu topbar biru solid, tanpa sidebar. Greenhouse yang dipantau dan
-dikontrol dipilih lewat tombol di topbar — tombol itu sekaligus menampilkan
-**status** unit tersebut (hijau = online, kuning = data basi, merah = offline).
-Navigasi cukup satu tombol **Log Sensor**: klik membuka histori, klik lagi
-kembali ke Beranda. Seluruh tampilan mengikuti satu skema warna (Material Blue
-berpusat di `#1565C0`) yang didefinisikan di `style.css`; grafik membaca
-variabel warna yang sama.
+dikontrol dipilih lewat tombol di topbar — isi tombol itu **kapan data terakhir
+masuk** (`2 hari 16 jam`), dan warnanya menandakan kondisi: hijau = data segar,
+kuning = basi kurang dari sehari, merah = basi lebih dari sehari atau gagal
+dibaca. Navigasi cukup satu tombol **Log Sensor**: klik membuka histori, klik
+lagi kembali ke Beranda. Seluruh tampilan mengikuti satu skema warna (Material
+Blue berpusat di `#1565C0`) yang didefinisikan di `style.css`; hijau dan merah
+diambil dari warna ON/OFF aktuator, dan grafik membaca variabel warna yang
+sama.
 
 **Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
 tanah, VPD, ET0, dan TDS) dalam dua kolom × tiga baris. Pada monitor lebar
 (≥ 900 px) kartu **Kontrol Aktuator** berdiri tepat di sebelahnya, sedangkan
-kartu **Grafik Tren Sensor** (20 titik terakhir, nama greenhouse yang dipantau,
-tombol Refresh) membentang penuh di bawah keduanya. Di ponsel semuanya menjadi
-satu kolom: metrik → kontrol → grafik.
+kartu **Grafik Tren Sensor** (20 titik terakhir, tombol Refresh) membentang
+penuh di bawah keduanya; nama greenhouse yang dipantau menyambung di judul
+kartu, jadi tidak lagi memakai chip terpisah. Di ponsel semuanya menjadi satu
+kolom: metrik → kontrol → grafik.
 
 Kartu kontrol memuat satu baris per aktuator (Misting, Irigasi, Blower, Auto)
 dengan status ON/OFF dan sakelarnya. Kartu ini terlihat untuk semua orang, tapi
 **sakelarnya hanya muncul setelah login admin**.
 
+![Tampilan ponsel](docs/mobile.png)
+
 **Log Sensor** menampilkan histori dalam tabel, lengkap dengan pilihan jumlah
 baris (10/20/50) dan pencarian. Tampilan menyesuaikan lebar layar, dari ponsel
-sampai monitor lebar.
+sampai monitor lebar. Di layar sempit tabel digeser mendatar, dan **kolom waktu
+tetap menempel di kiri** supaya konteks tiap baris tidak ikut hilang.
 
 ![Log Sensor](docs/log-sensor.png)
 
