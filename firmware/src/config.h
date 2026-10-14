@@ -95,9 +95,16 @@
 // Filter EMA (Exponential Moving Average): y[n] = alpha*x[n] + (1-alpha)*y[n-1].
 // alpha kecil = lebih halus tapi lebih lambat. Dipakai untuk suhu & kelembaban
 // (input VPD) serta soil, agar VPD dan keputusan irigasi tidak bergetar.
+// Alfa di sini PER-SAMPEL, bukan per-detik: konstanta waktunya t = dt/alfa.
+// Loop controlTask 2000 ms dengan alfa 0.2 -> t = 10 s (63% perubahan dalam
+// 10 s). Kalau periode loop diubah, alfa harus diskalakan ulang: alfa = dt/(t+dt).
 #define EMA_ALPHA_TEMP  0.2f
 #define EMA_ALPHA_HUM   0.2f
 #define EMA_ALPHA_SOIL  0.2f
+// TDS paling bising (pompa fert berdenyut 2 s on / 1 s off, jadi dua iterasi
+// berurutan bisa menangkap kondisi adukan berbeda). Difilter lebih cepat dari
+// suhu/kelembapan supaya gate target TDS tidak bereaksi pada satu sampel.
+#define EMA_ALPHA_TDS   0.3f
 
 // Kontrol VPD berbasis setpoint fase (di-set admin dari dashboard). Jika VPD
 // target aktif: VPD > target+BAND -> MISTING; VPD < target-BAND -> BLOWER;

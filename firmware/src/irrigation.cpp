@@ -26,6 +26,10 @@ static void nextPhase(IrrigPhase p) {
     setPumps(false, false, false, false);
 }
 
+IrrigPhase irrigationPhase() {
+    return phase;
+}
+
 bool irrigationRunning() {
     return phase != IRRIG_IDLE;
 }

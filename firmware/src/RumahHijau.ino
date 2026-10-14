@@ -41,7 +41,7 @@ static Snapshot gSnap;
 static SemaphoreHandle_t snapMux = nullptr;
 
 // Filter EMA sinyal sensor (lihat filter.h). Alfa dari config.h.
-static EmaFilter tempFilter, humFilter, soilFilter;
+static EmaFilter tempFilter, humFilter, soilFilter, tdsFilter;
 
 // VPD (Tetens): kPa = SVP - AVP.
 static float calcVpd(float temp, float humidity) {
@@ -106,6 +106,7 @@ static void controlTask(void* arg) {
     bool alertActive = false;
     unsigned long lastFailPrint = 0;
     TickType_t lastWake = xTaskGetTickCount();
+    IrrigPhase prevIrrigPhase = IRRIG_IDLE;
 
     // Fail-safe I2C nyangkut: subscribe controlTask ke Task WDT. Core arduino-esp32
     // sudah menyalakan CONFIG_ESP_TASK_WDT + PANIC (timeout 5 s), jadi cukup daftar.
@@ -122,12 +123,30 @@ static void controlTask(void* arg) {
         float soilRaw = analogRead(SOIL_PIN);
         sensorData = readSensors(soilRaw);
         // Filter EMA suhu/RH (input VPD) & soil agar VPD dan keputusan irigasi stabil.
+        // Suhu/RH wajib lewat guard valid: readSensors bisa mengembalikan NaN dan
+        // NaN yang masuk EMA merusak nilainya secara permanen. Soil tidak - probe
+        // soil kanal analog terpisah yang tetap terbaca walau SHT31 mati.
         if (sensorData.valid) {
-            sensorData.temperature  = emaUpdate(tempFilter, sensorData.temperature);
-            sensorData.humidity     = emaUpdate(humFilter, sensorData.humidity);
-            sensorData.soilMoisture = emaUpdate(soilFilter, sensorData.soilMoisture);
+            sensorData.temperature = emaUpdate(tempFilter, sensorData.temperature);
+            sensorData.humidity    = emaUpdate(humFilter, sensorData.humidity);
         }
-        tdsPpm = readTDS(sensorData.temperature);
+        sensorData.soilMoisture = emaUpdate(soilFilter, sensorData.soilMoisture);
+
+        // TDS juga difilter, karena inilah kanal paling bising: pompa fert
+        // berdenyut 2 s on / 1 s off sementara loop baca tiap 2 s, jadi dua
+        // iterasi berurutan menangkap kondisi adukan yang berbeda. Diuji dengan
+        // konsentrasi naik 400->1060 ppm dan noise denyut: pembacaan mentah
+        // melewati gate saat konsentrasi asli baru 820 ppm (fase FERT berhenti
+        // terlalu awal, underpupuk), yang terfilter baru di 1060 ppm. Timeout
+        // 120 detik tetap menjadi pengaman atas (filter menambah ~8 detik).
+        // Reset tiap siklus masuk FERT hanya pengaman tambahan: setelah fase FILL
+        // 30 detik (15 iterasi) residual filter tinggal ~403 ppm, jadi nilainya
+        // sudah hampir habis - yang diluted reset adalah FILL yang dipendekkan
+        // atau siklus yang dibatalkan di tengah FERT.
+        IrrigPhase irrigPhase = irrigationPhase();
+        if (irrigPhase == IRRIG_FERT && prevIrrigPhase != IRRIG_FERT) emaReset(tdsFilter);
+        prevIrrigPhase = irrigPhase;
+        tdsPpm = emaUpdate(tdsFilter, readTDS(sensorData.temperature));
 
         if (sensorData.valid) {
             vpdValue = calcVpd(sensorData.temperature, sensorData.humidity);
@@ -313,6 +332,7 @@ void setup() {
     emaInit(tempFilter, EMA_ALPHA_TEMP);
     emaInit(humFilter, EMA_ALPHA_HUM);
     emaInit(soilFilter, EMA_ALPHA_SOIL);
+    emaInit(tdsFilter, EMA_ALPHA_TDS);
     phaseInit();
     delay(2000);
 
