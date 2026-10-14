@@ -1,6 +1,7 @@
 # Secrets (never commit)
 firmware/src/secrets.h
 firmware_old/src/secrets.h
+web/config.js
 
 # Firmware uji coba lokal (bukan bagian repo)
 hw_test/
