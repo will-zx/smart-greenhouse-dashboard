@@ -37,6 +37,9 @@ web/rules_rtdb.bak
 # Pipeline keseluruhan proyek (lokal, bukan untuk repo/deploy)
 PIPELINE.md
 
+# Desain 3D panel box (OpenSCAD + STL, lokal)
+design/
+
 # Capstone documents (not versioned)
 Asset/
 Dokumen_Pendukung/
