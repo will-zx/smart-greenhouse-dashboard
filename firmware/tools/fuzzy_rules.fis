@@ -85,6 +85,8 @@ MF3=High : trimf : [0.85 1 1]
 3 3 (TH) : 6 6 (HH) -> 2 (High)
 2 2 (TO) : 6 6 (HH) -> 2 (Med)
 3 3 (TH) : 4 4 (HL) -> 2 (Low)
+3 3 (TH) : 5 5 (HO) -> 2 (Med)
+2 2 (TO) : 5 5 (HO) -> 2 (Low)
 10 10 (VL) : 10 10 (VL) -> 2 (Low)
 1 1 (TC) : 1 1 (TC) -> 2 (Off)
 

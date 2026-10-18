@@ -184,7 +184,7 @@ IN_mf     = {[10 18 25; 22 27 32; 28 34 42], ...
              [0 0.2 0.5; 1.3 1.6 2.0], ...
              [0 2 5; 4 6 12]};
 
-%% --- Tabel rule (fuzzy.cpp:41-69), level = consequent singleton ---------
+%% --- Tabel rule (fuzzy.cpp:41-74), level = consequent singleton ---------
 % tiap baris: {nama, anteseden A, anteseden B, level}, indeks = posisi di MU_NAME
 % A dan B boleh sama; min(mu,mu)=mu, jadi aturan itu jadi pengencer (level 0)
 MIST_RULES = {
@@ -202,6 +202,8 @@ BLOWER_RULES = {
   "H+RH_tinggi", 3,  6, 1.0     % {T_HOT, H_HIGH, BLOWER_HIGH}
   "O+RH_tinggi", 2,  6, 0.7     % {T_OPT, H_HIGH, BLOWER_MED}
   "H+RH_rendah", 3,  4, 0.4     % {T_HOT, H_LOW, BLOWER_LOW}
+  "H+RH_mid",    3,  5, 0.7     % {T_HOT, H_OPT, BLOWER_MED}  % pengisi zona RH 45-80
+  "O+RH_mid",    2,  5, 0.4     % {T_OPT, H_OPT, BLOWER_LOW}  % pengisi zona RH 45-80
   "Udara_jenuh",10, 10, 0.4     % {V_LOW, V_LOW, BLOWER_LOW}
   "Dingin",      1,  1, 0.0     % {T_COLD, T_COLD, 0.0}
 };
@@ -229,14 +231,14 @@ cases = [30 70 35 1.6 5.5;    % kasus yang sama dengan contoh proposal 2.2.4
          18 50 40 0.3 1.0;    % pita mati: 0,13 < duty < 0,20
          22 60 15 1.0 11.0;
          30 70 80 1.6 2.0];
-expect = [0.7356 0.0000 0.5000;
+expect = [0.7356 0.5364 0.5000;
           0.7714 1.0000 0.5000;
           1.0000 0.4000 0.5000;
-          0.0000 0.7000 0.0000;
-          0.6000 0.7000 0.5000;
+          0.0000 0.5500 0.0000;
+          0.6000 0.4600 0.5000;
           0.0000 0.1600 0.0000;
           0.0000 0.0000 1.0000;
-          0.4591 0.0000 0.0000];
+          0.4591 0.5364 0.0000];
 
 fprintf("== HASIL SIMULASI ==\n");
 fprintf("%-24s %7s %7s %7s   %s\n", "T,RH,soil,VPD,ETc", "mist", "blower", "irig", "duty blower");
@@ -295,8 +297,10 @@ if do_plots()
   close(fig);
 
   % Plot 2: peta panas level blower (suhu x kelembapan), VPD tetap
+  % Sapuan RH dibatasi 95 %: di atas 100 % seluruh keanggotaan RH bernilai nol,
+  % jadi tidak ada aturan yang bisa aktif (fan tidak mungkin menyala di RH 100 %).
   Tv = linspace(16, 40, 120);
-  Rv = linspace(10, 100, 120);
+  Rv = linspace(10, 95, 120);
   [TT, RR] = meshgrid(Tv, Rv);
   Bv = zeros(size(TT));
   for i = 1:numel(TT)
@@ -333,9 +337,9 @@ if do_plots()
     lv = arrayfun(@(rh) duty_cmd(fuzzy_eval(T, rh, 50, 1.5, 5.0)), Rv);
     plot(Rv, 100*lv, "linewidth", 1.8); hold on;
   end
-  plot([0 100], [100*ON_THRESHOLD 100*ON_THRESHOLD], "--", "color", [0 .6 0]);
-  plot([0 100], [100*HW_START 100*HW_START], ":", "color", [0.8 0 0]);
-  plot([0 100], [100*HW_STOP 100*HW_STOP], ":", "color", [0.8 0 0]);
+  plot([0 max(Rv)], [100*ON_THRESHOLD 100*ON_THRESHOLD], "--", "color", [0 .6 0]);
+  plot([0 max(Rv)], [100*HW_START 100*HW_START], ":", "color", [0.8 0 0]);
+  plot([0 max(Rv)], [100*HW_STOP 100*HW_STOP], ":", "color", [0.8 0 0]);
   text(1, 100*HW_START+3, "duty minimum kipas 20 % (dibulatkan naik)", "color", [0.8 0 0]);
   text(1, 100*ON_THRESHOLD+3, "ambang logika fuzzy 10 %", "color", [0 .6 0]);
   ylim([-5 108]); grid on;

@@ -54,6 +54,11 @@ static const Rule BLOWER_RULES[] = {
     { T_HOT, H_HIGH, BLOWER_HIGH },
     { T_OPT, H_HIGH, BLOWER_MED  },
     { T_HOT, H_LOW,  BLOWER_LOW  },
+    // Pengisi zona RH 45-80: tanpa dua aturan ini duty meloncat 40 % -> 0 % -> 85 %
+    // (lihat firmware/tools/out/03_sapuan_duty.png). H_OPT tumpang tindih dengan
+    // H_LOW/H_HIGH, jadi transisinya bertahap dan tidak ada RH yang tanpa blower.
+    { T_HOT, H_OPT,  BLOWER_MED  },
+    { T_OPT, H_OPT,  BLOWER_LOW  },
     { V_LOW, V_LOW,  BLOWER_LOW  },  // udara jenuh → ventilasi turunkan kelembapan
     { T_COLD, T_COLD, 0.0 },
 };
