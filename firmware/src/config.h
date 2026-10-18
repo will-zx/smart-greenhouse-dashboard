@@ -37,6 +37,10 @@
 #define BLOWER_PIN      25
 #define BLOWER_FREQ     1000   // XY-MOS: spesifikasi PWM 0-20 kHz (25 kHz mati <100%); 1 kHz teruji
 #define BLOWER_RES      8
+// Duty minimum blower yang benar-benar memutar kipas (hw_test Okt 2026: start
+// ~20 %, stop ~13 %). Level fuzzy di bawah ini dibulatkan naik ke nilai ini
+// supaya perintah 0 < level < min tidak memerintahkan kipas yang diam.
+#define BLOWER_MIN_DUTY 0.20f
 #define MOSFET_INVERTED 0
 
 // Irigasi = 4 pompa dalam satu siklus (state machine di irrigation.cpp):

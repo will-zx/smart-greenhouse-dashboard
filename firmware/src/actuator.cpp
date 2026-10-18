@@ -7,6 +7,17 @@ static const int BLOWER_CH = 0;
 void setActuators(bool mist, bool blower, float blowerLevel) {
     digitalWrite(MOSFET_MIST, (mist ^ MOSFET_INVERTED) ? HIGH : LOW);
     // 2 kipas 12x12cm paralel; kecepatan proporsional blowerLevel (0..1) dari fuzzy.
+    // Level di bawah duty minimum kipas dibulatkan naik: tanpa ini perintah
+    // 0 < level < BLOWER_MIN_DUTY menyalakan kipas yang tidak berputar.
+    static bool reported = false;
+    if (blower && blowerLevel > 0.0f && blowerLevel < BLOWER_MIN_DUTY) {
+        if (!reported) {
+            Serial.printf("[act] blower duty %.0f%% -> %.0f%% (min kipas)\n",
+                          blowerLevel * 100, BLOWER_MIN_DUTY * 100);
+            reported = true;
+        }
+        blowerLevel = BLOWER_MIN_DUTY;
+    }
     uint8_t duty = blower ? (uint8_t)(blowerLevel * ((1 << BLOWER_RES) - 1)) : 0;
     ledcWrite(BLOWER_CH, duty);
 }
