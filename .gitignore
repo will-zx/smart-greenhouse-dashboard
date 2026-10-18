@@ -6,6 +6,9 @@ web/config.js
 # Firmware uji coba lokal (bukan bagian repo)
 hw_test/
 
+# Grafik hasil simulasi fuzzy (dibuat ulang: octave --eval "fuzzy_sim")
+firmware/tools/out/
+
 # Build & tooling artifacts
 .pio/
 .pioenvs/
