@@ -3,7 +3,11 @@
   // `assets.directory` inilah yang menentukan folder hasil build — tidak ada
   // setting "build output directory" di dashboard Pages, jadi harus di sini.
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "smart-greenhouse-dashboard",
+  // WAJIB sama persis dengan nama Worker di dashboard Cloudflare. Kalau beda,
+  // `wrangler deploy` membuat Worker BARU dan tidak pernah menyentuh yang
+  // sudah ada — dashboard production tetap menyajikan versi lama.
+  // Mengubahnya di sini berarti subdomain workers.dev ikut berubah.
+  "name": "smart-gh",
   "compatibility_date": "2026-10-19",
   "assets": {
     "directory": "./dist",
