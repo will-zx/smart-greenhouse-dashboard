@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* Palet diambil apa adanya dari style.css lama supaya warna tidak bergeser
+   saat redesign. Nama class mengikuti token di bawah: bg-card, text-muted,
+   border-border, text-accent-dark, dst. */
+@theme {
+  --color-bg: #f5f7fa;
+  --color-card: #ffffff;
+  --color-card-2: #f5f8fd;
+  --color-border: #e1e8f5;
+  --color-ink: #212121;
+  --color-muted: #616161;
+  --color-accent: #1565c0;
+  --color-accent-dark: #0d47a1;
+  --color-accent-light: #90caf9;
+  --color-accent-soft: #e3f2fd;
+  --color-ok: #388e3c;
+  --color-danger: #e53935;
+  --color-danger-soft: #fef2f2;
+  --color-track: #bbdefb;
+
+  /* Status koneksi unit di topbar (dari .zone-btn.is-ok/.is-stale/.is-off) */
+  --color-stale: #e8e91b;
+  --color-off: #d5372f;
+
+  /* Breakpoint lama (900/700/420) dipertahankan supaya proporsi kartu
+     tidak berubah: pakai min-[900px]: / max-[700px]: / max-[420px]: */
+}
+
+/* Ikon brand di topbar: greenhouse.png sebagai mask, persis .brand-icon lama.
+   Mask membuat warna glyph ikut currentColor (putih di atas topbar biru),
+   sedangkan <img> tidak bisa. */
+@layer components {
+  .brand-icon {
+    background-color: currentColor;
+    -webkit-mask: url(/greenhouse.png) no-repeat center / contain;
+    mask: url(/greenhouse.png) no-repeat center / contain;
+  }
+}
+
+/* Badge status di tabel log. Isi teks (MISTING/BLOWER/IRIGASI) yang membedakan,
+   bukan warna — semua status aktif memakai satu aksen. */
+@layer components {
+  .pill {
+    @apply inline-block rounded-full px-2.5 py-[3px] text-[11px] font-bold;
+  }
+  .pill-idle {
+    @apply bg-card-2 text-muted;
+  }
+  .pill-on {
+    @apply bg-accent-soft text-accent-dark;
+  }
+}

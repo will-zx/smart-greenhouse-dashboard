@@ -15,9 +15,9 @@ masuk** (`2 hari 16 jam`), dan warnanya menandakan kondisi: hijau = data segar,
 kuning = basi kurang dari sehari, merah = basi lebih dari sehari atau gagal
 dibaca. Navigasi cukup satu tombol **Log Sensor**: klik membuka histori, klik
 lagi kembali ke Beranda. Seluruh tampilan mengikuti satu skema warna (Material
-Blue berpusat di `#1565C0`) yang didefinisikan di `style.css`; hijau dan merah
-diambil dari warna ON/OFF aktuator, dan grafik membaca variabel warna yang
-sama.
+Blue berpusat di `#1565C0`) yang didefinisikan sebagai token Tailwind di
+`web/src/style.css`; hijau dan merah diambil dari warna ON/OFF aktuator, dan
+grafik membaca variabel warna yang sama.
 
 **Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
 tanah, VPD, ET0, dan TDS) dalam dua kolom × tiga baris. Pada monitor lebar
@@ -40,7 +40,7 @@ tetap menempel di kiri** supaya konteks tiap baris tidak ikut hilang.
 
 ![Log Sensor](docs/log-sensor.png)
 
-Menambah unit greenhouse = tambah baris di `ZONES` (`web/config.js`) dengan
+Menambah unit greenhouse = tambah baris di `ZONES` (`web/public/config.js`) dengan
 `id` yang sama dengan `DEVICE_ID` firmware, plus tambahkan UID perangkat itu ke
 allowlist rules RTDB.
 
@@ -143,7 +143,11 @@ perintah. I/O jaringan yang blocking tidak pernah menahan jalur aktuator.
 
 ```text
 firmware/src/     Firmware utama
-web/              Dashboard statis: index.html, app.js, config.js, style.css
+web/              Dashboard (Vue 3 + Vite + Tailwind)
+  src/store.js    State + fetch RTDB + auth (satu reactive())
+  src/components/ 9 komponen: App, Topbar, Metrics, Controls, TrendChart, ...
+  public/         config.js + greenhouse.png (di-copy apa adanya ke dist/)
+  dist/           Hasil `npm run build` (tidak di-commit)
 ```
 
 ## Menjalankan
@@ -156,9 +160,20 @@ cd firmware && pio run -t upload && pio device monitor
 `secrets.h.example`, lalu isi SSID WiFi, API key Firebase, dan kredensial akun
 perangkat.
 
-Dashboard membutuhkan HTTP server, bukan dibuka langsung lewat `file://`,
-karena memakai modul Firebase. Salin `web/config.js.example` ke `web/config.js`
-lalu isi `firebaseConfig` dan `DB_URL`.
+Dashboard butuh Node.js (Vite) dan tidak bisa dibuka lewat `file://`. Salin
+`web/config.js.example` ke `web/public/config.js`, lalu isi `firebaseConfig`,
+`DB_URL`, dan `ZONES`.
+
+```bash
+cd web
+npm install
+npm run dev      # dev server + HMR  → http://localhost:5173
+npm run build    # produksi → dist/ (yang di-deploy Cloudflare Pages)
+npm run preview  # cek hasil build sebelum deploy
+```
+
+Karena memakai ES module, dashboard harus disajikan lewat HTTP — `npm run dev`
+menangani ini. `ZONES` menambah satu unit greenhouse per baris.
 
 ## Lisensi
 
