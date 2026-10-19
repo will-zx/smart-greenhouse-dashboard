@@ -7,7 +7,7 @@
   // `wrangler deploy` membuat Worker BARU dan tidak pernah menyentuh yang
   // sudah ada — dashboard production tetap menyajikan versi lama.
   // Mengubahnya di sini berarti subdomain workers.dev ikut berubah.
-  "name": "smart-gh",
+  "name": "smartgh",
   "compatibility_date": "2026-10-19",
   "assets": {
     "directory": "./dist",
