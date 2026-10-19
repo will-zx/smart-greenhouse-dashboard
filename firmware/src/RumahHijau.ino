@@ -33,6 +33,7 @@ static const int NET_TASK_CORE = 0;
 struct Snapshot {
     float temperature, humidity, soilMoisture, vpd, etc, tds;
     bool  valid, manual, mist, blower, irigasiRunning;
+    float blowerLevel;  // 0..1, tingkat blower yang benar-benar dijalankan (PWM)
     char  status[40];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
     PhaseState phase;   // setelan fase + VPD target (untuk telemetri DB)
 };
@@ -255,6 +256,7 @@ static void controlTask(void* arg) {
         s.mist = mist;
         s.blower = blower;
         s.irigasiRunning = irigasiRunning;
+        s.blowerLevel = bl;   // keluaran fuzzy yang jadi perintah PWM
         snprintf(s.status, sizeof(s.status), "%s", systemStatus);
         if (mist) strncat(s.status, " MISTING", sizeof(s.status) - strlen(s.status) - 1);
         if (blower) strncat(s.status, " BLOWER", sizeof(s.status) - strlen(s.status) - 1);
@@ -301,7 +303,8 @@ static void netTask(void* arg) {
                 lastPush = now;
                 String body;
                 bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
-                                        s.vpd, s.etc, s.tds, s.status, s.manual, s.phase, &body);
+                                        s.vpd, s.etc, s.tds, s.blowerLevel, s.mist,
+                                        s.irigasiRunning, s.status, s.manual, s.phase, &body);
                 if (ok) {
                     sdFlushBacklog();   // pulih: kirim antrean yang tertunda
                 } else if (body.length() > 0) {

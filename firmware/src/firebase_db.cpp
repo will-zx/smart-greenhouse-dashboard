@@ -73,6 +73,7 @@ static bool httpPost(const String& path, const String& body) {
 }
 
 bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
+                   float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
                    String* bodyOut) {
     if (WiFi.status() != WL_CONNECTED) return false;
@@ -88,6 +89,11 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["vpd"] = vpd;
     doc["et0"] = etc;
     doc["tds"] = tds;
+    // Keluaran fuzzy = perintah aktuator yang dijalankan. Dashboard memakai
+    // angka ini, bukan menguraikan string status_sistem.
+    doc["blower_level"] = blowerLevel;
+    doc["misting"] = misting;
+    doc["irigasi"] = irigasi;
     doc["status_sistem"] = statusSistem;
     doc["manual_mode"] = manualMode;
     // Telemetri fase & VPD target (di-set admin dari dashboard).

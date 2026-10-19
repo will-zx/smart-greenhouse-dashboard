@@ -8,6 +8,7 @@
 // bodyOut (opsional) diisi JSON yang dikirim — dipakai SD logger utk antrian.
 // phase: setelan fase + VPD target saat ini (ikut dicatat ke RTDB).
 bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
+                   float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
                    String* bodyOut = nullptr);
 // POST body JSON apa pun ke /sensor_logs (untuk backfill backlog MicroSD).
