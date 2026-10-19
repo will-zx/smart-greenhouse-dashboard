@@ -152,6 +152,10 @@ web/              Dashboard (Vue 3 + Vite + Tailwind)
 
 ## Menjalankan
 
+Dashboard yang sedang live: **https://smartgh.capstone-26.workers.dev/**
+(Cloudflare Workers dengan static assets). Terbuka untuk semua orang; sakelar
+kendali dan ikon ganti nama unit hanya muncul setelah login admin.
+
 ```bash
 cd firmware && pio run -t upload && pio device monitor
 ```
