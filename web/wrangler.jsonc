@@ -1,0 +1,12 @@
+{
+  // Cloudflare Workers dengan static assets (bukan Pages klasik).
+  // `assets.directory` inilah yang menentukan folder hasil build — tidak ada
+  // setting "build output directory" di dashboard Pages, jadi harus di sini.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "smart-greenhouse-dashboard",
+  "compatibility_date": "2026-10-19",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  }
+}
