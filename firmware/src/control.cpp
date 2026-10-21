@@ -85,3 +85,11 @@ bool controlIsManual() {
     unlock();
     return r;
 }
+
+OverrideState controlOverrides() {
+    lock();
+    expireManual();
+    OverrideState ov = { ovMist, ovIrig, ovBlower };
+    unlock();
+    return ov;
+}

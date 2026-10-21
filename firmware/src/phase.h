@@ -11,6 +11,7 @@ struct PhaseState {
     bool     active;                     // true bila VPD target sudah pernah di-set
     float    vpdTarget;                  // target VPD (kPa)
     char     name[PHASE_NAME_LEN];       // nama fase (mis. "Vegetatif")
+    float    kc;                         // Kc fase ini (Tabel 2.1 proposal)
     uint32_t durationSec;                // durasi fase (detik); 0 = tanpa batas
     uint32_t elapsedSec;                 // sudah berjalan sejak durasi di-set (detik)
     uint32_t remainingSec;               // sisa durasi (detik); 0 bila tanpa batas/habis
@@ -24,6 +25,7 @@ void  phaseReset();                   // mulai ulang penghitung durasi dari nol
 void  phaseDeactivate();              // matikan mode setpoint/fase (kembali penuh ke fuzzy)
 bool  phaseActive();                  // ada VPD target aktif?
 float phaseVpdTarget();               // VPD target saat ini (kPa)
+float phaseKc();                      // Kc fase sekarang (dari nama fase)
 PhaseState phaseGet();                // snapshot lengkap (untuk telemetri/DB)
 
 #endif

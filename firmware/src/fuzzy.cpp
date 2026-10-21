@@ -23,10 +23,14 @@ static float soilWet(float s)     { return trimf(s, 60, 80, 100); }
 static float vpdLow(float v)  { return trimf(v, 0.0, 0.2, 0.5); }
 static float vpdHigh(float v) { return trimf(v, 1.3, 1.6, 2.0); }
 
-// ETc (Blaney-Criddle, mm): kebutuhan air tanaman. Tepi membership "tinggi"
-// mempertahankan batas lama shouldIrrigate (etc > 6) sebagai area transisi.
-static float etcLow(float e)  { return trimf(e, 0.0, 2.0, 5.0); }
-static float etcHigh(float e) { return trimf(e, 4.0, 6.0, 12.0); }
+// ETc (mm/hari) = kebutuhan air tanaman. Ambang membership mengikuti skala
+// Blaney-Criddle yang sudah dikoreksi: p = 0,48 (config.h) dan Kc 0,40-1,10
+// (Tabel 2.1 proposal) -> rentang ETc ~2,9 - 13,6 mm/hari.
+// Versi lama (0-2-5 & 4-6-12) memang cocok dengan skala ETc lama
+// (4,3-6,4 mm/hari); kalau p/Kc diperbaiki tanpa menurunkan ulang ambang,
+// etcHigh = 0 di siang hari -> IRIGASI MATI.
+static float etcLow(float e)  { return trimf(e, 0.0, 4.0, 8.0); }
+static float etcHigh(float e) { return trimf(e, 5.0, 9.0, 18.0); }
 
 static const float MIST_LOW = 0.3, MIST_MED = 0.6, MIST_HIGH = 1.0;
 static const float BLOWER_LOW = 0.4, BLOWER_MED = 0.7, BLOWER_HIGH = 1.0;

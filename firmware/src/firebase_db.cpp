@@ -125,16 +125,28 @@ static bool httpPost(const String& path, const String& body) {
 }
 
 // NaN/Inf tidak boleh masuk RTDB (diparse sebagai null dan merusak grafik
-// dashboard) -> field yang tidak valid simply tidak dikirim.
+// dashboard) -> field yang tidak valid simply tidak dikirim. Dashboard
+// membaca field yang hilang sebagai "-" dan tidak memplot titik palsu.
 static void putNum(JsonDocument& doc, const char* key, float v) {
     if (isnan(v) || isinf(v)) return;
     doc[key] = v;
 }
 
+// Status override manual per aktuator -> string untuk dashboard.
+//   "auto"   = ikut fuzzy (tidak ada override)
+//   "manual" = dipaksa NYALA
+//   "forced" = dipaksa MATI
+// Angka setara di control.cpp: -1 / +1 / 0. Dashboard WAJIB memakai field ini
+// untuk menampilkan sakelar override (bukan status aktuator).
+static const char* ovName(int8_t ov) {
+    if (ov < 0) return "auto";
+    return (ov == 1) ? "manual" : "forced";
+}
+
 bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
                    float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
-                   String* bodyOut) {
+                   const OverrideState& ov, float tmean, String* bodyOut) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
     // ts = epoch (NTP). Kalau NTP belum sinkron, record TETAP dikirim (tanda
@@ -148,6 +160,10 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     putNum(doc, "humidity", humidity);
     putNum(doc, "soil", soil);
     putNum(doc, "vpd", vpd);
+    // "etc" = nama final (isi = ETc, sudah x Kc). "et0" disimpan sebagai
+    // alias lama supaya dashboard yang belum migrate tidak ikut rusak;
+    // hapus "et0" setelah sesi web memakai "etc".
+    putNum(doc, "etc", etc);
     putNum(doc, "et0", etc);
     putNum(doc, "tds", tds);
     // Keluaran fuzzy = perintah aktuator yang dijalankan. Dashboard memakai
@@ -157,6 +173,10 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["irigasi"] = irigasi;
     doc["status_sistem"] = statusSistem;
     doc["manual_mode"] = manualMode;
+    // Status override per aktuator (sakelar dashboard).
+    doc["mist_ov"] = ovName(ov.mist);
+    doc["irig_ov"] = ovName(ov.irig);
+    doc["blower_ov"] = ovName(ov.blower);
     // Telemetri fase & VPD target (di-set admin dari dashboard).
     doc["fase"] = phase.name;
     doc["vpd_target"] = phase.vpdTarget;
@@ -164,6 +184,10 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["fase_durasi_s"] = phase.durationSec;
     doc["fase_elapsed_s"] = phase.elapsedSec;
     doc["fase_sisa_s"] = phase.remainingSec;
+    // Kc fase aktif (Tabel 2.1 proposal) + Tmean yang dipakai menghitung ETc
+    // (pendekatan praktis, bukan ETo standar FAO-56).
+    doc["kc_aktif"] = phase.kc;
+    putNum(doc, "tmean_c", tmean);
     doc["time_synced"] = timeOk;
     if (timeOk) doc["ts"] = ts;
     doc["device"] = DEVICE_ID;

@@ -6,9 +6,13 @@
 % Plot butuh graphics toolkit; untuk headless pasang gnuplot
 % (sudo pacman -S gnuplot). Tanpa itu tabel dan .fis tetap dibuat.
 %
-% Isi fungsi ini adalah SALINAN dari firmware/src/fuzzy.cpp (versi 1.3). Kalau
+% Isi fungsi ini adalah SALINAN dari firmware/src/fuzzy.cpp (versi 1.4). Kalau
 % tabel membership atau tabel rule di fuzzy.cpp berubah, salinan di sini wajib
 % ikut berubah — tiap blok diberi nomor baris sumbernya.
+%
+% v1.4 (Okt 2026): ambang membership ETc diturunkan ulang ke skala Blaney-
+% Criddle yang dikoreksi (p = 0,48; Kc 0,40-1,10 -> ETc ~2,9-13,6 mm/hari).
+% Versi lama (0-2-5 & 4-6-12) cocok dengan skala ETc lama (4,3-6,4 mm/hari).
 %
 % Catatan kejujuran: firmware memakai FUZZY SUGENO-0 (rata-rata berbobot dengan
 % consequent singleton), bukan Mamdani murni. Rumusnya sama dengan
@@ -175,14 +179,14 @@ MU_NAME = {"TC","TO","TH","HL","HO","HH","SD","SO","SW","VL","VH","EL","EH"};
 IN_name   = {'Temperature', 'Humidity', 'Soil', 'VPD', 'ETc'};
 IN_label  = {'Suhu (°C)', 'Kelembapan udara (%)', 'Kelembapan tanah (%)', ...
              'VPD (kPa)', 'ETc (mm)'};
-IN_range  = {[0 50], [0 100], [0 100], [0 3], [0 14]};
+IN_range  = {[0 50], [0 100], [0 100], [0 3], [0 18]};
 IN_mfname = {{'Cold', 'Opt', 'Hot'}, {'Low', 'Opt', 'High'}, ...
              {'Dry', 'Opt', 'Wet'}, {'Low', 'High'}, {'Low', 'High'}};
 IN_mf     = {[10 18 25; 22 27 32; 28 34 42], ...
              [0 30 55; 45 65 80; 70 85 100], ...
              [0 15 35; 30 50 70; 60 80 100], ...
              [0 0.2 0.5; 1.3 1.6 2.0], ...
-             [0 2 5; 4 6 12]};
+             [0 4 8; 5 9 18]};
 
 %% --- Tabel rule (fuzzy.cpp:41-74), level = consequent singleton ---------
 % tiap baris: {nama, anteseden A, anteseden B, level}, indeks = posisi di MU_NAME
@@ -223,19 +227,22 @@ LEDC_MAX     = 255;       % 8 bit, BLOWER_RES (config.h:39)
 PWM_FREQ     = 1000;      % BLOWER_FREQ (config.h:38)
 
 %% --- Kasus acuan (dihitung dari kode yang sama) --------------------------
-cases = [30 70 35 1.6 5.5;    % kasus yang sama dengan contoh proposal 2.2.4
-         32 85 50 1.8 6.0;
-         34 30 20 2.0 4.0;
-         25 75 55 0.6 2.0;
-         28 72 45 1.5 5.0;
-         18 50 40 0.3 1.0;    % pita mati: 0,13 < duty < 0,20
-         22 60 15 1.0 11.0;
-         30 70 80 1.6 2.0];
-expect = [0.7356 0.5364 0.5000;
+% Kolom ETc mengikuti skala Blaney-Criddle versi 1.4 (p = 0,48, Kc 0,40-1,10):
+% ETc ~2,9-13,6 mm/hari. Kasus 1 memakai ETc 7,9 mm (T 30 °C, Kc 0,75,
+% p 0,48) -> sama dengan contoh perhitungan proposal 2.2.4 versi baru.
+cases = [30 70 35 1.6 7.9;    % kasus yang sama dengan contoh proposal 2.2.4
+         32 85 50 1.8 8.2;
+         34 30 20 2.0 8.7;
+         25 75 55 0.6 3.0;    % kebutuhan air rendah (fase awal, Kc 0,40)
+         28 72 45 1.5 7.5;
+         18 50 40 0.3 3.0;    % pita mati: 0,13 < duty < 0,20
+         22 60 15 1.0 11.0;   % tanah kering + kebutuhan tinggi
+         30 70 80 1.6 7.9];   % tanah basah -> tidak ada irigasi
+expect = [0.7356 0.5364 0.4545;
           0.7714 1.0000 0.5000;
-          1.0000 0.4000 0.5000;
+          1.0000 0.4000 1.0000;
           0.0000 0.5500 0.0000;
-          0.6000 0.4600 0.5000;
+          0.6000 0.4600 0.4167;
           0.0000 0.1600 0.0000;
           0.0000 0.0000 1.0000;
           0.4591 0.5364 0.0000];
@@ -269,8 +276,8 @@ end
 fprintf("\n-- sapuan duty blower (soil 50, VPD 1.5) --\n");
 fprintf("%6s %10s %10s %12s %12s\n", "RH", "lvl30", "lvl34", "duty30", "duty34");
 for rh = [10 20 30 40 50 55 58 60 65 70 72 75 80 90]
-  o30 = fuzzy_eval(30, rh, 50, 1.5, 5.0);
-  o34 = fuzzy_eval(34, rh, 50, 1.5, 5.0);
+  o30 = fuzzy_eval(30, rh, 50, 1.5, 7.0);
+  o34 = fuzzy_eval(34, rh, 50, 1.5, 7.0);
   fprintf("%6.0f %10.3f %10.3f %12.3f %12.3f\n", rh, ...
           o30.blower, o34.blower, duty_cmd(o30), duty_cmd(o34));
 end
@@ -304,7 +311,7 @@ if do_plots()
   [TT, RR] = meshgrid(Tv, Rv);
   Bv = zeros(size(TT));
   for i = 1:numel(TT)
-    Bv(i) = fuzzy_eval(TT(i), RR(i), 50, 1.5, 5.0).blower;
+    Bv(i) = fuzzy_eval(TT(i), RR(i), 50, 1.5, 7.0).blower;
   end
 
   % Plot 3: peta panas level blower (suhu x VPD), RH tetap
@@ -312,7 +319,7 @@ if do_plots()
   [TT2, VV] = meshgrid(Tv, Vv);
   B2 = zeros(size(TT2));
   for i = 1:numel(TT2)
-    B2(i) = fuzzy_eval(TT2(i), 60, 50, VV(i), 5.0).blower;
+    B2(i) = fuzzy_eval(TT2(i), 60, 50, VV(i), 7.0).blower;
   end
 
   fig = figure("visible", "off", "position", [0 0 1150 470]);
@@ -334,7 +341,7 @@ if do_plots()
   % Plot 4: sapuan duty vs kelembapan (bukti transisi bertahap)
   fig = figure("visible", "off", "position", [0 0 1100 500]);
   for T = [30 34]
-    lv = arrayfun(@(rh) duty_cmd(fuzzy_eval(T, rh, 50, 1.5, 5.0)), Rv);
+    lv = arrayfun(@(rh) duty_cmd(fuzzy_eval(T, rh, 50, 1.5, 7.0)), Rv);
     plot(Rv, 100*lv, "linewidth", 1.8); hold on;
   end
   plot([0 max(Rv)], [100*ON_THRESHOLD 100*ON_THRESHOLD], "--", "color", [0 .6 0]);
@@ -351,23 +358,23 @@ if do_plots()
 
   % Plot 5: level misting dan irigasi vs kelembapan tanah
   Sv = linspace(0, 100, 200);
-  m1 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 5.5).mist, Sv);
-  m2 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 8.0).mist, Sv);
-  i1 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 5.5).irrig, Sv);
-  i2 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 8.0).irrig, Sv);
+  m1 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 7.9).mist, Sv);
+  m2 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 11.0).mist, Sv);
+  i1 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 7.9).irrig, Sv);
+  i2 = arrayfun(@(s) fuzzy_eval(30, 65, s, 1.6, 11.0).irrig, Sv);
   fig = figure("visible", "off", "position", [0 0 1150 470]);
   subplot(1, 2, 1);
   plot(Sv, 100*m1, "-", Sv, 100*m2, "--", "linewidth", 1.8);
   ylim([-5 108]); grid on;
   xlabel("Kelembapan tanah (%)"); ylabel("Level (%)");
   title("Misting (T 30 °C, RH 65 %, VPD 1,6 kPa)");
-  legend("ETc 5,5 mm", "ETc 8,0 mm", "location", "northeast");
+  legend("ETc 7,9 mm", "ETc 11,0 mm", "location", "northeast");
   subplot(1, 2, 2);
   plot(Sv, 100*i1, "-", Sv, 100*i2, "--", "linewidth", 1.8);
   ylim([-5 108]); grid on;
   xlabel("Kelembapan tanah (%)"); ylabel("Level (%)");
   title("Irigasi, masukan yang sama");
-  legend("ETc 5,5 mm", "ETc 8,0 mm", "location", "northeast");
+  legend("ETc 7,9 mm", "ETc 11,0 mm", "location", "northeast");
   print(fig, "-dpng", "-r110", "firmware/tools/out/04_misting_irigasi.png");
   close(fig);
 

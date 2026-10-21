@@ -12,6 +12,14 @@ enum : uint8_t { C_MIST = 1 << 0, C_IRIG = 1 << 1, C_BLOWER = 1 << 2 };
 // Manual hanya berlaku untuk aktuator yang benar-benar di-override. Dulu
 // override memakai satu bitmask buat semua aktuator, jadi mematikan satu
 // sakelar mematikan SEMUA aktuator dan tidak ada jalan kembali selain Auto.
+//
+// Status override per aktuator (dikirim ke RTDB supaya dashboard bisa
+// menampilkan sakelar override, bukan status aktuator):
+//   -1 = "auto" (ikut fuzzy), 0 = "forced" (dipaksa mati), 1 = "manual" (dipaksa nyala)
+struct OverrideState {
+    int8_t mist, irig, blower;
+};
+
 void controlInit();   // buat mutex — panggil sebelum task dibuat
 void controlRelease();// semua aktuator kembali ke kendali fuzzy
 void controlSet(uint8_t bit, bool on);   // on = paksa nyala, off = kembali ke fuzzy
@@ -19,5 +27,6 @@ void controlSet(uint8_t bit, bool on);   // on = paksa nyala, off = kembali ke f
 // blower di-override.
 void controlApply(bool* mist, bool* irigasi, bool* blower, float* blowerLevel = nullptr);
 bool controlIsManual();
+OverrideState controlOverrides();   // status override saat ini (untuk telemetri)
 
 #endif

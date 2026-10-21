@@ -39,10 +39,10 @@ MF2=High : trimf : [1.3 1.6 2]
 
 [Input5]
 name=ETc
-range=[0 14]
+range=[0 18]
 NumMFs=2
-MF1=Low : trimf : [0 2 5]
-MF2=High : trimf : [4 6 12]
+MF1=Low : trimf : [0 4 8]
+MF2=High : trimf : [5 9 18]
 
 [Output1]
 name=misting

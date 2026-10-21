@@ -55,6 +55,32 @@
 #define IRRIG_FERT_PULSE_MS 2000     // pompa fert nyala 2s (mengaduk) -> jeda 1s sampling
 #define IRRIG_FERT_IDLE_MS  1000
 #define IRRIG_TDS_HYSTERESIS 20.0    // toleransi di sekitar TDS_TARGET_PPM
+// Jumlah sampel TDS invalid BERURUTAN yang membatalkan fase FERT.
+// Loop controlTask 2 s -> 3 sampel ~ 6 s. Satu sampel noisey (pompa fert
+// berdenyut) tidak boleh menggagalkan pemupukan satu siklus.
+#define IRRIG_FERT_INVALID_LIMIT 3
+
+// ==== KALIBRASI VOLUME IRIGASI (BELUM DIUKUR) ====
+// TODO: semua angka di bawah BELUM pernah diukur di device. Durasi pompa
+// FILL/DIST masih placeholder dari estimasi kasar (ember 5-10 L), sehingga
+// volume satu siklus bisa 10-100x kebutuhan harian tanaman.
+//
+// LANGKAH UKUR (belum dilakukan):
+//  1) Debit pompa: hitung volume yang keluar (DIST) / masuk ember (FILL)
+//     selama 30 s dengan gelas ukur, ulangi 3x, ambil rata-rata -> ml/detik.
+//  2) Luas media: ukur diameter pot/media (d, cm) -> luas = pi*d^2/4 (cm2).
+//  3) Volume harian per tanaman = ETc (mm/hari) * luas (cm2) = ml/hari;
+//     durasi DIST = volume / debit DIST.
+//  4) Isi konstanta di bawah, lalu set IRRIG_AUTO_ENABLED = 1.
+#define PUMP_FILL_ML_PER_S    0.0f    // TODO: belum diukur
+#define PUMP_DIST_ML_PER_S    0.0f    // TODO: belum diukur
+#define POTTING_AREA_CM2      0.0f    // TODO: belum diukur
+#define IRRIG_CYCLES_PER_DAY  0       // TODO: belum diukur
+#define IRRIG_EFFICIENCY      0.0f    // TODO: belum diukur
+// Gate: selama debit pompa & luas media belum diketahui, irigasi OTOMATIS
+// (keputusan fuzzy) DIMATIKAN supaya device tidak menyiram jauh melebihi
+// kebutuhan tanaman. Override manual operator tetap bisa menjalankan siklus.
+#define IRRIG_AUTO_ENABLED    0
 
 // MicroSD (SPI, pin default VSPI ESP32: SCK 18, MISO 19, MOSI 23, CS 5).
 // Backup lokal: seluruh log + antrian saat push Firebase gagal.
@@ -73,12 +99,41 @@
 // PSU cadangan: hardware-only — ESP32 + aktuator bisa ditenagai powerbank/PSU
 // kedua saat listrik mati. Tidak ada kode khusus; dokumentasi di Laporan.
 
-// Blaney-Criddle: ETc = Kc * p * (0.46*T + 8), p ≈ PEAK_HOURS/12 (ekuator ~0.27).
-// Kc cabai: 0.4 (awal) / 0.75 (vegetatif) / 1.1 (bunga-buah). Referensi:
-// "Penetapan Kebutuhan Air Tanaman Cabai Merah"; "Modified Blaney-Criddle...".
-#define KC_CHILI       0.75
-#define PEAK_HOURS     4.0
+// ==== Blaney-Criddle: kebutuhan air ====
+// ETo = p * (0,46 * Tmean + 8) ; ETc = Kc * ETo   (mm/hari)
+//
+// Faktor p = fraksi jam siang tahunan (dimensionless).
+// Rumus FAO-24: p = (N/24) * (1 + 0,033*cos(2*pi*J/365)), N = jam siang efektif.
+// Indonesia (0-7 LS) dengan N = 12 jam -> p ~ 0,48-0,50.
+// TODO: tabel p resmi FAO-24 BELUM terverifikasi (dokumen FAO-24 tidak tersedia
+// daring; FAO-56 yang daring hanya memuat Penman-Monteith & pan evaporation).
+// Angka ini berasal dari RUMUS FAO-24, bukan dari tabel resmi -> sebelum
+// dipakai di laporan harus dicek ke sumber primer.
+// Catatan: kode lama memakai p = PEAK_HOURS/12 = 0,333 (PEAK_HOURS = jam puncak
+// matahari, BUKAN jam siang) -> ETo kurang ~30 % dari rumus FAO-24.
+#define BC_P_FACTOR      0.48f
+// Konstanta rumus Blaney-Criddle: ETo = p * (BC_T_COEF * Tmean + BC_T_CONST).
+#define BC_T_COEF        0.46f
+#define BC_T_CONST       8.0f
+// Tmean = rata-rata suhu sliding 3 jam (ember 1 menit). FAO-56 menetapkan
+// Penman-Monteith sebagai metode standar; Blaney-Criddle (FAO-24) dikalibrasi
+// untuk periode panjang, jadi hasil di sini PENDEKATAN PRAKTIS (bukan ETo
+// standar) dan harus diberi label begitu di log maupun telemetri.
+#define BC_TMEAN_BUCKET_MS   60000UL   // 1 menit per ember
+#define BC_TMEAN_BUCKETS     180      // 180 ember x 1 menit = 3 jam sliding
+// Batas atas ETo (mm/hari) supaya nilai ekstrem tidak dipakai.
 #define MAX_ET0        12.0
+
+// Kc per fase pertumbuhan. Sumber: Tabel 2.1 proposal ("Nilai koefisien
+// tanaman (Kc) pada tanaman cabai merah", data Supriadi et al. [10]):
+// Awal 0,40 | Vegetatif 0,75 | Pembungaan 1,10 | Pemuliaan buah 1,00 | Panen 0,90
+// Default = fase "Vegetatif" -> perilaku lama (Kc 0,75) tetap berlaku.
+#define KC_AWAL           0.40f
+#define KC_VEGETATIF      0.75f
+#define KC_PEMBUNGAAN     1.10f
+#define KC_PEMULIAAN_BUAH 1.00f
+#define KC_PANEN          0.90f
+#define KC_DEFAULT        KC_VEGETATIF
 
 // Soil Moisture Calibration (modul KAPASITIF, inverted ADC: kering=tinggi, basah=rendah).
 // SOIL_DRY  = ADC saat probe di udara kering (teramati ~2644 di serial).

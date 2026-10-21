@@ -54,6 +54,8 @@ void phaseSetName(const char* name) {
     strncpy(s_name, name, PHASE_NAME_LEN - 1);
     s_name[PHASE_NAME_LEN - 1] = '\0';
     prefs.putString("ph_name", s_name);
+    // Log Kc ikut berubah supaya bisa dibuktikan dari log port.
+    Serial.printf("[fase] fase: %s (Kc %.2f)\n", s_name, phaseKc());
 }
 
 void phaseSetDuration(uint32_t seconds) {
@@ -70,12 +72,27 @@ void phaseReset() {
 bool  phaseActive()    { return s_active; }
 float phaseVpdTarget() { return s_vpdTarget; }
 
+// Kc aktif mengikuti NAMA fase yang sedang berjalan (Tabel 2.1 proposal).
+// Nama fase diisi admin lewat dashboard ("set_fase"), jadi pemetaannya
+// berbasis nama, bukan indeks. Nama yang tidak dikenal -> Kc default
+// (Vegetatif) supaya perilaku lama tetap berlaku.
+float phaseKc() {
+    const char* n = s_name;
+    if (strcasestr(n, "awal"))     return KC_AWAL;
+    if (strcasestr(n, "vegetatif"))return KC_VEGETATIF;
+    if (strcasestr(n, "pembungaan") || strcasestr(n, "bunga")) return KC_PEMBUNGAAN;
+    if (strcasestr(n, "pemuliaan") || strcasestr(n, "buah"))  return KC_PEMULIAAN_BUAH;
+    if (strcasestr(n, "panen"))    return KC_PANEN;
+    return KC_DEFAULT;
+}
+
 PhaseState phaseGet() {
     PhaseState st;
     st.active = s_active;
     st.vpdTarget = s_vpdTarget;
     strncpy(st.name, s_name, PHASE_NAME_LEN - 1);
     st.name[PHASE_NAME_LEN - 1] = '\0';
+    st.kc = phaseKc();
     st.durationSec = s_durationSec;
     uint32_t el = elapsedSec();
     if (s_durationSec > 0 && el > s_durationSec) el = s_durationSec;
