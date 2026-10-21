@@ -58,6 +58,13 @@ export const state = reactive({
 // karena hanya dipakai sebagai persentase/ppm bulat.
 export const fmtNum = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.toFixed(d) : '-';
 
+// Volume air: mL -> liter (>= 1 L), di bawah itu tetap mL. Null = tidak ada
+// data (firmware lama / device belum push) -> pemanggil tidak menampilkan apa-apa.
+export const fmtMl = v => {
+  if (typeof v !== 'number' || !isFinite(v)) return null;
+  return v >= 1000 ? (v / 1000).toFixed(1) + ' L' : Math.round(v) + ' mL';
+};
+
 // Soil moisture = 0..100%. Sensor capacitive yang belum terpasang (pin
 // menggantung) dibaca ADC tinggi -> ~100% palsu. Nilai di luar 5..95% tidak
 // ditampilkan sebagai angka.
@@ -194,6 +201,20 @@ export function normLog(l, key) {
       duration: numOrNull(src.fase_durasi_s),
       elapsed: numOrNull(src.fase_elapsed_s),
       remaining: numOrNull(src.fase_sisa_s),
+    },
+    // Telemetri irigasi (firmware push). Dosis air per siklus dihitung dari
+    // ETc, jadi ini yang menunjukkan "kebutuhan air -> volume air" di layar.
+    // Field tidak ada (firmware lama / device belum push) -> null, dan
+    // komponen tidak menampilkan apa-apa.
+    // Nama "irigasiInfo" (bukan "irigasi") karena key "irigasi" sudah dipakai
+    // untuk status boolean aktuator di atas.
+    irigasiInfo: {
+      doseMl: numOrNull(src.irigasi_dosis_ml),
+      doseMs: numOrNull(src.irigasi_durasi_ms),
+      budgetMl: numOrNull(src.irigasi_anggaran_ml),
+      usedMl: numOrNull(src.irigasi_terpakai_ml),
+      intervalMin: numOrNull(src.irigasi_jeda_menit),
+      holdReason: typeof src.irigasi_alasan_tahan === 'string' ? src.irigasi_alasan_tahan : '',
     },
   };
   row.override = {

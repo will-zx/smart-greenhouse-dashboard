@@ -1,9 +1,28 @@
 <script setup>
 import { computed } from 'vue';
-import { state, actuators, manualInfo, onSwitch, releaseAll } from '../store.js';
+import { state, actuators, manualInfo, onSwitch, releaseAll, fmtMl } from '../store.js';
 
 const a = computed(() => actuators.value);
 const mi = computed(() => manualInfo.value);
+
+// Telemetri irigasi: dosis per siklus (dihitung dari ETc), durasi pompa, jeda
+// minimum, dan anggaran harian. Ini yang membuat "kebutuhan air -> volume
+// air" terlihat di layar. Kalau perangkat belum push field ini (firmware
+// lama), bloknya disembunyikan - bukan menampilkan angka kosong.
+const ig = computed(() => state.lastData?.irigasiInfo || null);
+const igLine = computed(() => {
+  const r = ig.value;
+  if (!r) return null;
+  const dose = fmtMl(r.doseMl);
+  if (!dose) return null;
+  const parts = ['Dosis siklus ' + dose];
+  if (r.doseMs) parts.push(Math.round(r.doseMs / 1000) + ' s pompa');
+  if (r.intervalMin) parts.push('jeda min ' + Math.round(r.intervalMin / 60) + ' jam');
+  const budget = fmtMl(r.budgetMl);
+  const used = fmtMl(r.usedMl);
+  if (budget) parts.push('anggaran harian ' + budget + (used ? ' (terpakai ' + used + ')' : ''));
+  return parts.join(' \u00b7 ');
+});
 
 // Kartu Kontrol tetap terlihat untuk semua orang (=status aktuator berguna untuk
 // dipantau), tetapi sakelarnya disembunyikan bila belum login admin.
@@ -71,6 +90,16 @@ const ovOf = k => a.value.override[k] || 'auto';
       class="mb-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[11.5px] leading-snug text-warn"
     >
       <b>Irigasi otomatis dimatikan di perangkat</b> — debit pompa belum dikalibrasi. Perintah manual tetap bisa dijalankan.
+    </div>
+
+    <!-- Telemetri irigasi: dosis dari ETc, durasi pompa, jeda minimum, dan
+         anggaran harian. disembunyikan kalau perangkat belum mengirimnya. -->
+    <div
+      v-if="igLine"
+      class="mb-3 rounded-lg border border-border bg-card-2 px-3 py-2 text-[11px] leading-snug text-muted"
+    >
+      {{ igLine }}
+      <span v-if="ig.holdReason" class="block text-warn">Ditahan: {{ ig.holdReason }}</span>
     </div>
 
     <div class="flex flex-col gap-2">

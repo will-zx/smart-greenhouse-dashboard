@@ -97,10 +97,15 @@ FreeRTOS.
 | --- | --- | --- | --- |
 | Misting | GPIO 26 | Digital | Penyiram kabut |
 | Blower (2 kipas paralel) | GPIO 25 | PWM 1 kHz, 8-bit | Ventilasi |
-| Pompa FILL | GPIO 13 | Digital | Isi ember campuran, 12 V |
-| Pompa FERT A | GPIO 14 | Digital | Pupuk A, 5 V |
-| Pompa FERT B | GPIO 15 | Digital | Pupuk B, 5 V |
+| Pompa FILL | GPIO 13 | Digital | Isi ember campuran, 12 V (terpasang, tidak dipakai selama fertigasi ditunda) |
+| Pompa FERT A | GPIO 14 | Digital | Pupuk A, 5 V (terpasang, tidak dipakai selama fertigasi ditunda) |
+| Pompa FERT B | GPIO 15 | Digital | Pupuk B, 5 V (terpasang, tidak dipakai selama fertigasi ditunda) |
 | Pompa DIST | GPIO 32 | Digital | Salur ke tanaman, 12 V |
+
+Debit pompa DIST terukur 31,7 mL/s (gelas ukur + stopwatch, 3×, rata-rata).
+Kalibrasi irigasi — debit, luas media, dan jumlah siklus per hari — ada di
+`firmware/src/config.h`; dosis dan durasi pompa dihitung dari sana, bukan
+ditulis tetap.
 
 ### Tambahan
 
@@ -116,7 +121,7 @@ modul XY-MOS aktif-LOW dapat dipakai tanpa mengubah kode.
 flowchart LR
   subgraph ESP ["ESP32 · controlTask (core 1) · tiap 2 detik"]
     direction LR
-    S["SHT31<br/>Soil · TDS"] --> F["filter EMA"] --> V["VPD · ETc"] --> Z{{"fuzzy Mamdani"}} --> A["aktuator<br/>misting · blower · 4 pompa"]
+    S["SHT31<br/>Soil · TDS"] --> F["filter EMA"] --> V["VPD · ETc"] --> Z{{"fuzzy Mamdani"}} --> A["aktuator<br/>misting · blower · pompa DIST"]
   end
   R[("Firebase RTDB")]
   D["Dashboard web"]
@@ -137,17 +142,23 @@ suhu, kelembapan, tanah, VPD, dan ETc. Aturan disimpan sebagai tabel di
 `fuzzy.cpp`; level 0 berarti "off" dan hanya menurunkan bobot.
 
 **VPD dan ETc.** VPD dihitung dengan rumus Tetens (`calcVpd` di
-`RumahHijau.ino`). ETc memakai metode Blaney-Criddle dengan Kc cabai 0.75 di
-`irrigation.cpp`.
+`RumahHijau.ino`). ETc memakai metode Blaney-Criddle di `irrigation.cpp`: faktor
+p = 0,48, Tmean = rata-rata suhu sliding 3 jam, dan Kc mengikuti fase
+pertumbuhan (0,40 / 0,75 / 1,10 / 1,00 / 0,90).
 
-**Siklus irigasi.** Berjalan tiga fase: FILL mengisi ember campuran, FERT
-menyalakan kedua pompa pemupuk dalam pola denyut 2 detik dan jeda 1 detik
-sampai TDS mencapai 1000 ppm, lalu DIST mengalirkan campuran ke tanaman. Fase
-FERT punya timeout keamanan 120 detik agar tidak berjalan terus.
+**Siklus irigasi.** Satu pompa DIST mengalirkan air dari penampungan utama ke
+tanaman. Dosis per siklus bukan timer tetap: dihitung dari ETc harian
+(ETc × luas media 9 000 cm² × 0,1), dibagi jumlah siklus per hari, lalu
+dijadikan durasi pompa lewat debit terukur 31,7 mL/s. Volume harian dibatasi
+anggaran ETc dan antar siklus ada jeda minimum, sehingga air yang keluar tidak
+melebihi kebutuhan tanaman. Fertigasi ditunda: pompa FILL dan FERT A/B terpasang
+tetapi tidak dijalankan firmware.
 
-**Fail-safe.** Bila sensor tidak valid, seluruh aktuator dimatikan dan siklus
-irigasi yang sedang berjalan dibatalkan. `controlTask` berlangganan Task WDT,
-sehingga I2C yang macet memicu reboot alih-alih membiarkan pompa menyala.
+**Fail-safe.** Bila sensor tidak valid, keputusan fuzzy untuk irigasi tidak
+dipakai dan siklus irigasi yang sedang berjalan dibatalkan. Override manual
+operator tetap berjalan karena itu perintah eksplisit. `controlTask`
+berlangganan Task WDT (diinisialisasi eksplisit, timeout 5 detik), sehingga I2C
+yang macet memicu reboot alih-alih membiarkan pompa menyala.
 
 **Pembagian task.** `controlTask` di core 1 menjalankan sensor, fuzzy, dan
 aktuator. `netTask` di core 0 menangani WiFi, token, push RTDB, dan poll
@@ -159,7 +170,8 @@ perintah. I/O jaringan yang blocking tidak pernah menahan jalur aktuator.
 firmware/src/     Firmware utama
 web/              Dashboard (Vue 3 + Vite + Tailwind)
   src/store.js    State + fetch RTDB + auth (satu reactive())
-  src/components/ 9 komponen: App, Topbar, Metrics, Controls, TrendChart, ...
+  src/components/ 10 komponen: App, Metrics, Controls, PhasePanel, TrendChart,
+                  LogTable, ZoneMenu, ZoneStatus, UserMenu, LoginModal
   public/         config.js + greenhouse.png (di-copy apa adanya ke dist/)
   dist/           Hasil `npm run build` (tidak di-commit)
 ```
@@ -186,7 +198,7 @@ Dashboard butuh Node.js (Vite) dan tidak bisa dibuka lewat `file://`. Salin
 cd web
 npm install
 npm run dev      # dev server + HMR  → http://localhost:5173
-npm run build    # produksi → dist/ (yang di-deploy Cloudflare Pages)
+npm run build    # produksi → dist/ (yang di-deploy Cloudflare Workers, static assets)
 npm run preview  # cek hasil build sebelum deploy
 ```
 
