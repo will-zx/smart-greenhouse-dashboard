@@ -8,111 +8,144 @@
 % "kelihatan benar"). Skenario diuji dengan assert, jadi regresi di
 % irrigation.cpp langsung ketahuan tanpa perlu device.
 %
+% Prototipe sekarang memakai SATU pompa (DIST): siklus IDLE -> DIST -> IDLE.
+% Dosis air per siklus dihitung dari ETc (Blaney-Criddle):
+%   anggaran_harian_ml = ETc * IRRIG_AREA_CM2 * 0,1
+%   dosis_ml           = anggaran_harian_ml / IRRIG_CYCLES_PER_DAY
+%   durasi_pompa_ms    = dosis_ml / PUMP_DIST_ML_PER_S * 1000
+%   jeda_minimum_ms    = 24 jam / IRRIG_CYCLES_PER_DAY
+%
 % Skenario yang diuji:
-%   (a) sensor invalid -> abort -> sensor pulih dengan permintaan masih TRUE
-%       -> siklus LANGSUNG jalan lagi (bug prevTrigger yang dulu bikin
-%          irigasi mati permanen)
-%   (b) permintaan turun lalu naik lagi -> siklus baru (satu permintaan =
-%       satu siklus)
-%   (c) abort di tengah fase FERT -> semua pompa mati
-%   (d) permintaan TRUE terus-menerus -> hanya SATU siklus
-%   (e) satu sampel TDS invalid tidak membatalkan fase FERT; tiga sampel
-%       berturut-turut baru membatalkan (fail-safe + toleransi noise)
+%   (a) ETc 8,68 -> siklus pertama jalan dengan durasi 123 s
+%   (b) permintaan kedua dalam 1 menit DITAHAN oleh jeda minimum (12 jam)
+%   (c) setelah jeda minimum lewat, siklus kedua jalan
+%   (d) setelah 2 siklus, siklus ketiga DITAHAN oleh anggaran harian (7812 mL)
+%   (e) ETc turun ke 7,02 -> dosis & durasi ikut turun (99,7 s)
+%   (f) ETc naik ke 11,51 (fase pembungaan) -> dosis 5180 mL, durasi 163,4 s
+%   (g) soil invalid -> tidak menyiram
+%   (h) manual override -> siklus boleh jalan
+%   (i) satu permintaan = satu siklus (tidak ada siklus ganda)
 
 function irrig_sim()
 
-%% --- Parameter (salinan config.h) ----------------------------------------
-cfg.IRRIG_FILL_MS           = 30000;
-cfg.IRRIG_DIST_MS           = 120000;
-cfg.IRRIG_FERT_TIMEOUT_MS   = 120000;
-cfg.IRRIG_FERT_PULSE_MS     = 2000;
-cfg.IRRIG_FERT_IDLE_MS      = 1000;
-cfg.IRRIG_FERT_INVALID_LIMIT = 3;
-cfg.TDS_TARGET_PPM          = 1000;
-cfg.IRRIG_TDS_HYSTERESIS    = 20;
-cfg.STEP_MS                 = 2000;    % periode controlTask
+%% --- Parameter (salinan config.h, sudah terukur 21 Okt 2026) --------------
+cfg.PUMP_DIST_ML_PER_S   = 31.7;    % mL/s (gelas ukur + stopwatch, 3x, rata-rata)
+cfg.IRRIG_AREA_CM2       = 9000;    % 10 polybag 30x30 cm -> 900 cm2 per tanaman
+cfg.IRRIG_CYCLES_PER_DAY = 2;
+cfg.STEP_MS              = 2000;    % periode controlTask
+
+%% --- Tabel acuan: ETc -> anggaran harian -> dosis -> durasi ------------
+% Angka acuan yang harus keluar dari perhitungan (A_total 9000 cm2,
+% 2 siklus/hari, debit 31,7 mL/s).
+ref = [7.02  6318  3159   99.7;
+       7.85  7065  3533  111.4;
+       8.68  7812  3906  123.2;
+      11.51 10359  5180  163.4];
+for k = 1:rows(ref)
+  assert(near(daily_budget_ml(cfg, ref(k,1)), ref(k,2), 1), ...
+         'tabel acuan: anggaran harian ETc %.2f != %.0f mL', ref(k,1), ref(k,2));
+  assert(near(dose_ml(cfg, ref(k,1)), ref(k,3), 1), ...
+         'tabel acuan: dosis ETc %.2f != %.0f mL', ref(k,1), ref(k,3));
+  assert(near(dose_ms(cfg, ref(k,1)) / 1000, ref(k,4), 0.2), ...
+         'tabel acuan: durasi ETc %.2f != %.1f s', ref(k,1), ref(k,4));
+endfor
+assert(min_interval_ms(cfg) == 43200000, 'tabel acuan: jeda minimum bukan 12 jam');
+printf('Tabel acuan ETc -> anggaran -> dosis -> durasi COCOK (4 baris, jeda 12 jam)\n\n');
 
 %% --- Fungsi pembantu (nested: Octave tidak meng-hoist fungsi skrip) ------
 function st = next_phase(st, p)
   st.phase = p;
   st.phaseStart = st.now;
-  st.fertInvalid = 0;
-  st.pumps = [0 0 0 0];
 endfunction
 
-function st = irr_update(st, trigger, tdsValid, tdsPpm)
-  % Edge-detect: 0->1 memulai siklus; permintaan yang terus tinggi tidak
-  % memicu siklus kedua.
-  if trigger && !st.prevTrigger && st.phase == 0
-    if st.resumePending
-      st.log{end+1} = 'siklus DIPULIHKAN';
-      st.resumePending = false;
-    else
-      st.log{end+1} = 'siklus dimulai';
-    endif
-    st = next_phase(st, 1);        % FILL
+function budget = daily_budget_ml(cfg, etcv)
+  % 1 mm x 1 cm2 = 0,1 mL
+  if etcv <= 0
+    budget = 0;
+  else
+    budget = etcv * cfg.IRRIG_AREA_CM2 * 0.1;
   endif
-  st.prevTrigger = trigger;
-  if !trigger
-    st.resumePending = false;
+endfunction
+
+function dose = dose_ml(cfg, etcv)
+  dose = daily_budget_ml(cfg, etcv) / cfg.IRRIG_CYCLES_PER_DAY;
+endfunction
+
+function ms = dose_ms(cfg, etcv)
+  ms = dose_ml(cfg, etcv) / cfg.PUMP_DIST_ML_PER_S * 1000;
+endfunction
+
+function ms = min_interval_ms(cfg)
+  ms = 86400000 / cfg.IRRIG_CYCLES_PER_DAY;
+endfunction
+
+function st = roll_over_day(st)
+  day = floor(st.now / 86400000);
+  if !st.dayInit
+    st.dayInit = true;
+    st.dayIndex = day;
+    st.usedMl = 0;
+  elseif day != st.dayIndex
+    st.dayIndex = day;
+    st.usedMl = 0;
+    st.log{end+1} = 'hari berganti: anggaran direset';
+  endif
+endfunction
+
+function st = irr_update(st, cfg, trigger, etcv)
+  st = roll_over_day(st);
+
+  if trigger && st.phase == 0
+    budget = daily_budget_ml(cfg, etcv);
+    dose = dose_ml(cfg, etcv);
+    dms = dose_ms(cfg, etcv);
+
+    if dose <= 0 || dms <= 0
+      st.log{end+1} = 'ETc belum tersedia, irigasi ditahan';
+    elseif st.usedMl + dose > budget + 0.5
+      st.log{end+1} = sprintf('anggaran harian habis: %.0f/%.0f mL', st.usedMl, budget);
+    elseif st.hasCycle && (st.now - st.lastCycleStartMs) < min_interval_ms(cfg)
+      st.log{end+1} = 'jeda minimum belum lewat';
+    else
+      st = next_phase(st, 1);              % DIST
+      st.cycleDoseMs = floor(dms);         % sama dengan konversi unsigned long di firmware
+      st.cycleDoseMl = dose;
+      st.lastCycleStartMs = st.now;
+      st.hasCycle = true;
+      st.usedMl += dose;
+      st.log{end+1} = sprintf(['irigasi: dose %.0f mL -> %.0f s | jeda min %.0f jam | ' ...
+                                'anggaran harian %.0f mL, terpakai %.0f mL'], ...
+                               dose, dms/1000, min_interval_ms(cfg)/3600000, budget, st.usedMl);
+    endif
   endif
 
-  if st.phase == 1                            % FILL
-    st.pumps = [1 0 0 0];
-    if st.now - st.phaseStart >= cfg.IRRIG_FILL_MS
-      st = next_phase(st, 2);                  % FERT
-    endif
-  elseif st.phase == 2                        % FERT
-    fertCancelled = false;
-    if !tdsValid
-      st.fertInvalid++;
-      if st.fertInvalid >= cfg.IRRIG_FERT_INVALID_LIMIT
-        st.log{end+1} = 'FERT batal (TDS invalid)';
-        st = next_phase(st, 3);                % DIST
-        fertCancelled = true;
-      endif
-    else
-      st.fertInvalid = 0;
-    endif
-    if !fertCancelled
-      t = st.now - st.phaseStart;
-      fertOn = mod(t, cfg.IRRIG_FERT_PULSE_MS + cfg.IRRIG_FERT_IDLE_MS) < cfg.IRRIG_FERT_PULSE_MS;
-      st.pumps = [0 fertOn fertOn 0];
-      if t >= cfg.IRRIG_FERT_TIMEOUT_MS
-        st = next_phase(st, 3);
-      elseif tdsValid && !fertOn && tdsPpm >= cfg.TDS_TARGET_PPM - cfg.IRRIG_TDS_HYSTERESIS
-        st.log{end+1} = 'TDS target tercapai';
-        st = next_phase(st, 3);
-      endif
-    endif
-  elseif st.phase == 3                        % DIST
-    st.pumps = [0 0 0 1];
-    if st.now - st.phaseStart >= cfg.IRRIG_DIST_MS
-      st.log{end+1} = 'siklus selesai';
+  if st.phase == 1
+    st.pumpOn = true;
+    if st.now - st.phaseStart >= st.cycleDoseMs
+      st.pumpOn = false;
       st = next_phase(st, 0);
+      st.log{end+1} = 'siklus selesai';
     endif
   endif
 endfunction
 
 function st = irr_abort(st)
-  if st.prevTrigger
-    st.resumePending = true;
-  endif
-  st.prevTrigger = false;
-  if st.phase != 0
-    st.log{end+1} = 'siklus dibatalkan (abort)';
-  endif
+  st.pumpOn = false;
   st = next_phase(st, 0);
 endfunction
 
 function st = init_state()
-  st.phase = 0;                  % 0 IDLE, 1 FILL, 2 FERT, 3 DIST
+  st.phase = 0;                  % 0 IDLE, 1 DIST
   st.phaseStart = 0;
   st.now = 0;
-  st.prevTrigger = false;
-  st.resumePending = false;
-  st.fertInvalid = 0;
-  st.pumps = [0 0 0 0];
+  st.usedMl = 0;
+  st.dayIndex = 0;
+  st.dayInit = false;
+  st.hasCycle = false;
+  st.lastCycleStartMs = 0;
+  st.cycleDoseMs = 0;
+  st.cycleDoseMl = 0;
+  st.pumpOn = false;
   st.log = {};
 endfunction
 
@@ -120,89 +153,119 @@ function n = count_log(st, what)
   n = sum(strcmp(st.log, what));
 endfunction
 
-%% --- (a) abort saat sensor invalid, lalu sensor pulih ---------------------
-st = init_state();
-st = irr_update(st, true, true, 400);        % permintaan naik -> siklus mulai
-assert(st.phase == 1, '(a) siklus tidak dimulai');
-st.now += cfg.STEP_MS;
-st = irr_abort(st);                          % sensor tidak valid -> abort
-assert(st.phase == 0, '(a) abort tidak mengembalikan fase ke IDLE');
-assert(all(st.pumps == 0), '(a) abort tidak mematikan semua pompa');
-st.now += cfg.STEP_MS;
-st = irr_update(st, true, true, 400);        % sensor pulih, permintaan masih TRUE
-assert(st.phase == 1, '(a) siklus tidak berjalan lagi setelah pemulihan');
-assert(count_log(st, 'siklus DIPULIHKAN') == 1, '(a) log "dipulihkan" tidak ada');
-printf('(a) abort -> pemulihan: siklus jalan lagi, log "DIPULIHKAN" ada  OK\n');
+function n = count_prefix(st, pref)
+  n = 0;
+  for k = 1:numel(st.log)
+    if strncmp(st.log{k}, pref, length(pref))
+      n++;
+    endif
+  endfor
+endfunction
 
-%% --- (b) permintaan turun lalu naik lagi -> siklus baru -------------------
-st = init_state();
-st = irr_update(st, true, true, 400);        % siklus #1
-while st.phase != 0                          % biarkan siklus #1 selesai
-  st.now += cfg.STEP_MS;
-  st = irr_update(st, true, true, 400);
-endwhile
-assert(count_log(st, 'siklus dimulai') == 1, '(b) lebih dari satu siklus dari satu permintaan');
-st.now += cfg.STEP_MS;
-st = irr_update(st, false, true, 400);       % permintaan turun (sakelar manual mati)
-assert(st.phase == 0, '(b) fase berubah tanpa permintaan');
-st.now += cfg.STEP_MS;
-st = irr_update(st, true, true, 400);        % permintaan naik lagi -> siklus #2
-assert(st.phase == 1, '(b) permintaan baru tidak memicu siklus');
-assert(count_log(st, 'siklus dimulai') == 2, '(b) siklus baru tidak tercatat');
-printf('(b) permintaan turun -> naik: siklus baru jalan, 2 siklus total  OK\n');
+function ok = near(a, b, tol)
+  ok = abs(a - b) <= tol;
+endfunction
 
-%% --- (c) abort di tengah fase FERT -> semua pompa mati ------------------
-st = init_state();
-st = irr_update(st, true, true, 400);
-while st.phase != 2                          % majukan ke fase FERT
-  st.now += cfg.STEP_MS;
-  st = irr_update(st, true, true, 400);
-endwhile
-% Pompa FERT berdenyut (2 s nyala, 1 s jeda) -> cek ada saat pompa hidup
-% di dalam fase FERT, bukan pada satu iterasi tertentu.
-fertSeen = false;
-for k = 1:6
-  st.now += cfg.STEP_MS;
-  st = irr_update(st, true, true, 400);
-  if st.phase == 2 && any(st.pumps(2:3))
-    fertSeen = true;
+% Logika .ino: soil invalid -> keputusan fuzzy tidak dipakai; override manual
+% operator menang (perintah eksplisit).
+function trigger = decide_trigger(soilValid, fuzzyWants, manualForced)
+  if manualForced
+    trigger = true;
+  else
+    trigger = soilValid && fuzzyWants;
   endif
-endfor
-assert(fertSeen, '(c) pompa FERT tidak pernah nyala di fase FERT');
-st.now += cfg.STEP_MS;
-st = irr_abort(st);
-assert(st.phase == 0, '(c) abort di tengah FERT tidak mengembalikan fase ke IDLE');
-assert(all(st.pumps == 0), '(c) abort di tengah FERT tidak mematikan semua pompa');
-printf('(c) abort di tengah FERT: semua pompa mati                    OK\n');
+endfunction
 
-%% --- (d) permintaan TRUE terus-menerus -> hanya satu siklus -------------
+%% --- (a) ETc 8,68 -> siklus pertama, durasi 123 s -----------------------
 st = init_state();
-for k = 1:200                                 % 200 x 2 s = 400 s
-  st.now += cfg.STEP_MS;
-  st = irr_update(st, true, true, 400);
-endfor
-assert(count_log(st, 'siklus dimulai') == 1, ...
-       '(d) permintaan tunggal menghasilkan %d siklus', count_log(st, 'siklus dimulai'));
-printf('(d) permintaan terus TRUE: tepat 1 siklus dalam 400 s          OK\n');
+etcv = 8.68;
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+assert(st.phase == 1, '(a) siklus tidak dimulai');
+assert(near(dose_ml(cfg, etcv), 3906, 1), '(a) dosis bukan 3906 mL');
+assert(near(dose_ms(cfg, etcv) / 1000, 123.2, 0.2), '(a) durasi bukan 123,2 s');
+assert(st.cycleDoseMs == floor(dose_ms(cfg, etcv)), '(a) durasi siklus tidak terkunci');
+assert(near(st.usedMl, 3906, 1), '(a) volume terpakai bukan 3906 mL');
+assert(count_prefix(st, 'irigasi: dose') == 1, '(a) log siklus tidak ada');
+printf('(a) ETc 8,68 -> dose 3906 mL, durasi 123 s, terpakai 3906 mL      OK\n');
 
-%% --- (e) toleransi noise TDS di fase FERT -------------------------------
+%% --- (b) permintaan kedua dalam 1 menit DITAHAN (siklus masih jalan) ----
+st.now += 60000;                                  % 1 menit kemudian
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+assert(st.phase == 1, '(b) siklus berhenti saat permintaan kedua datang');
+assert(count_prefix(st, 'irigasi: dose') == 1, '(b) ada siklus kedua saat siklus pertama jalan');
+assert(st.pumpOn, '(b) pompa DIST mati saat siklus berjalan');
+printf('(b1) permintaan 1 menit kemudian: siklus lama jalan, tak ada siklus ganda  OK\n');
+
+%% --- (b2) permintaan setelah siklus selesai, jeda minimum masih belum ----
+st.now += 180000;                                 % siklus (123 s) sudah selesai
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);   % menutup siklus
+assert(st.phase == 0, '(b2) siklus belum selesai');
+st.now += cfg.STEP_MS;
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);   % permintaan baru
+assert(st.phase == 0, '(b2) siklus jalan padahal jeda minimum belum lewat');
+assert(count_prefix(st, 'jeda minimum belum lewat') == 1, '(b2) log jeda minimum tidak ada');
+assert(near(st.usedMl, 3906, 1), '(b2) volume terpakai berubah padahal siklus ditahan');
+printf('(b2) permintaan setelah siklus selesai DITAHAN jeda minimum 12 jam    OK\n');
+
+%% --- (c) setelah jeda minimum lewat, siklus kedua jalan -----------------
+st.now += min_interval_ms(cfg);                   % +12 jam dari siklus pertama
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+assert(st.phase == 1, '(c) siklus kedua tidak jalan setelah jeda minimum');
+assert(count_prefix(st, 'irigasi: dose') == 2, '(c) siklus kedua tidak tercatat');
+assert(near(st.usedMl, 7812, 2), '(c) volume terpakai bukan 7812 mL');
+printf('(c) setelah jeda 12 jam, siklus kedua jalan (terpakai 7812 mL)    OK\n');
+
+%% --- (d) siklus ketiga DITAHAN oleh anggaran harian ---------------------
+st.now += 180000;                                 % siklus kedua selesai
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+st.now += cfg.STEP_MS;
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);   % permintaan ketiga
+assert(count_prefix(st, 'anggaran harian habis') == 1, '(d) log anggaran habis tidak ada');
+assert(near(st.usedMl, 7812, 2), '(d) volume terpakai berubah padahal ditahan');
+printf('(d) siklus ketiga DITAHAN: anggaran harian 7812/7812 mL           OK\n');
+
+%% --- (e) ETc turun ke 7,02 -> dosis & durasi ikut turun ------------------
+etcv = 7.02;
+assert(near(daily_budget_ml(cfg, etcv), 6318, 1), '(e) anggaran harian bukan 6318 mL');
+assert(near(dose_ml(cfg, etcv), 3159, 1), '(e) dosis bukan 3159 mL');
+assert(near(dose_ms(cfg, etcv) / 1000, 99.7, 0.2), '(e) durasi bukan 99,7 s');
+st.now += min_interval_ms(cfg);
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+assert(st.phase == 1, '(e) siklus dengan ETc turun tidak jalan');
+assert(near(st.cycleDoseMl, 3159, 1), '(e) dosis siklus bukan 3159 mL');
+printf('(e) ETc 7,02 -> dose 3159 mL, durasi 99,7 s                       OK\n');
+
+%% --- (f) ETc naik ke 11,51 (fase pembungaan) -> dose & durasi naik ------
+etcv = 11.51;
+assert(near(daily_budget_ml(cfg, etcv), 10359, 1), '(f) anggaran harian bukan 10359 mL');
+assert(near(dose_ml(cfg, etcv), 5180, 1), '(f) dosis bukan 5180 mL');
+assert(near(dose_ms(cfg, etcv) / 1000, 163.4, 0.2), '(f) durasi bukan 163,4 s');
+printf('(f) ETc 11,51 -> dose 5180 mL, durasi 163,4 s                     OK\n');
+
+%% --- (g) soil invalid -> tidak menyiram ---------------------------------
 st = init_state();
-st = irr_update(st, true, true, 400);
-while st.phase != 2
+st = irr_update(st, cfg, decide_trigger(false, true, false), etcv);
+assert(st.phase == 0, '(g) siklus jalan padahal soil invalid');
+assert(st.usedMl == 0, '(g) volume terpakai berubah padahal tidak menyiram');
+printf('(g) soil invalid -> tidak menyiram                               OK\n');
+
+%% --- (h) manual override -> siklus boleh jalan --------------------------
+st = init_state();
+st = irr_update(st, cfg, decide_trigger(false, true, true), etcv);
+assert(st.phase == 1, '(h) override manual tidak menjalankan siklus');
+assert(st.pumpOn, '(h) pompa DIST tidak hidup');
+printf('(h) override manual -> siklus jalan (pompa DIST hidup)             OK\n');
+
+%% --- (i) satu permintaan = satu siklus (tidak ada siklus ganda) ---------
+st = init_state();
+for k = 1:100                                     % 100 x 2 s = 200 s
   st.now += cfg.STEP_MS;
-  st = irr_update(st, true, true, 400);
-endwhile
-st.now += cfg.STEP_MS;
-st = irr_update(st, true, false, 0);         % sampel invalid #1
-assert(st.phase == 2, '(e) 1 sampel TDS invalid membatalkan fase FERT');
-st.now += cfg.STEP_MS;
-st = irr_update(st, true, false, 0);         % sampel invalid #2
-assert(st.phase == 2, '(e) 2 sampel TDS invalid membatalkan fase FERT');
-st.now += cfg.STEP_MS;
-st = irr_update(st, true, false, 0);         % sampel invalid #3
-assert(st.phase == 3, '(e) 3 sampel TDS invalid tidak membatalkan fase FERT');
-assert(count_log(st, 'FERT batal (TDS invalid)') == 1, '(e) log pembatalan FERT hilang');
-printf('(e) 1-2 sampel TDS invalid tolerated, 3 berturut membatalkan    OK\n');
+  st = irr_update(st, cfg, decide_trigger(true, true, false), 8.68);
+endfor
+assert(count_prefix(st, 'irigasi: dose') == 1, ...
+       '(i) permintaan tunggal menghasilkan %d siklus', count_prefix(st, 'irigasi: dose'));
+assert(st.phase == 0, '(i) pompa masih jalan setelah siklus selesai');
+printf('(i) permintaan terus TRUE: tepat 1 siklus (tidak ada siklus ganda)  OK\n');
 
 printf('\nSEMUA SKENARIO STATE MACHINE IRIGASI LOLOS\n');
 endfunction

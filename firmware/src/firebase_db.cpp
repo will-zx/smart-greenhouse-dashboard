@@ -12,6 +12,44 @@
 static WiFiClientSecure client;
 static HTTPClient http;
 
+// ==== Kontrak data sensor_logs (RTDB) ====
+// Satu record per push (tiap ~20 s) di /zones/{DEVICE_ID}/sensor_logs/{key}.
+// Field yang TIDAK boleh diubah namanya tanpa persetujuan antar subsistem.
+// Field angka yang tidak terbaca TIDAK dikirim (dashboard menampilkan "-").
+//
+//   temperature      °C      suhu udara (SHT31)
+//   humidity         %       kelembapan relatif udara (SHT31)
+//   soil             %       kelembapan tanah (probe capacitive)
+//   vpd              kPa     defisit tekanan uap (Tetens, dari T & RH)
+//   etc              mm/hari kebutuhan air tanaman (Blaney-Criddle x Kc fase)
+//   et0              mm/hari ALIAS LAMA dari "etc" (deprecated, hapus nanti)
+//   tmean_c          °C      Tmean sliding 3 jam yang dipakai menghitung ETc
+//   kc_aktif         -       Kc fase berjalan (Tabel 2.1 proposal)
+//   tds              ppm     TDS larutan (TELEMETRI SAJA, bukan alat dosis)
+//   blower_level     0..1    duty blower yang dijalankan (PWM 1 kHz)
+//   misting          bool    pompa misting hidup
+//   irigasi          bool    siklus irigasi berjalan
+//   status_sistem    string  status fuzzy + penanda (MISTING/BLOWER/IRIGASI/
+//                            SOILERR/TDSERR/NOSYNC/IRIGOFF)
+//   manual_mode      bool    ada aktuator yang di-override manual
+//   mist_ov          string  override misting: "auto" | "manual" | "forced"
+//   irig_ov          string  override irigasi: "auto" | "manual" | "forced"
+//   blower_ov        string  override blower:  "auto" | "manual" | "forced"
+//   fase             string  nama fase pertumbuhan
+//   vpd_target       kPa     target VPD fase
+//   fase_aktif       bool    mode setpoint aktif
+//   fase_durasi_s    s       durasi fase
+//   fase_elapsed_s   s       lama fase berjalan
+//   fase_sisa_s      s       sisa durasi fase
+//   irigasi_dosis_ml     mL     dosis air per siklus (dari ETc)
+//   irigasi_durasi_ms   ms     durasi pompa DIST untuk siklus itu
+//   irigasi_anggaran_ml mL     anggaran harian (ETc x luas area x 0,1)
+//   irigasi_terpakai_ml mL     volume yang sudah dialirkan hari ini
+//   irigasi_jeda_menit  menit  jeda minimum antar siklus
+//   time_synced       bool    jam perangkat sudah sinkron NTP
+//   ts                s       epoch waktu pengiriman (hanya bila sinkron)
+//   device            string  id unit
+//
 // ==== TLS (P2-12) — MASIH PROTOTYPING ====
 // Semua koneksi memakai client.setInsecure() -> verifikasi CA dimatikan.
 // Risikonya nyata: siapa pun yang bisa melakukan MITM di access point bisa
@@ -146,7 +184,8 @@ static const char* ovName(int8_t ov) {
 bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
                    float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
-                   const OverrideState& ov, float tmean, String* bodyOut) {
+                   const OverrideState& ov, float tmean, const IrrigStatus& irig,
+                   String* bodyOut) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
     // ts = epoch (NTP). Kalau NTP belum sinkron, record TETAP dikirim (tanda
@@ -188,6 +227,13 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     // (pendekatan praktis, bukan ETo standar FAO-56).
     doc["kc_aktif"] = phase.kc;
     putNum(doc, "tmean_c", tmean);
+    // Telemetri irigasi: dosis & durasi siklus, anggaran harian, volume
+    // terpakai hari ini, dan jeda minimum (lihat irrigation.h).
+    putNum(doc, "irigasi_dosis_ml", irig.doseMl);
+    putNum(doc, "irigasi_durasi_ms", (float)irig.doseMs);
+    putNum(doc, "irigasi_anggaran_ml", irig.budgetMl);
+    putNum(doc, "irigasi_terpakai_ml", irig.usedMl);
+    putNum(doc, "irigasi_jeda_menit", (float)(irig.minIntervalMs / 60000UL));
     doc["time_synced"] = timeOk;
     if (timeOk) doc["ts"] = ts;
     doc["device"] = DEVICE_ID;

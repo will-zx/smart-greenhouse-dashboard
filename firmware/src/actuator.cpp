@@ -27,7 +27,10 @@ void initActuators() {
     ledcSetup(BLOWER_CH, BLOWER_FREQ, BLOWER_RES);  // 1 kHz: spek XY-MOS 0-20 kHz
     ledcAttachPin(BLOWER_PIN, BLOWER_CH);
 
-    // 4 pompa irigasi di-drive state machine irrigation.cpp; pastikan mati di awal.
+    // Pompa irigasi: yang dipakai state machine irrigation.cpp hanya DIST.
+    // PUMP_FILL/PUMP_FERT_A/PUMP_FERT_B tidak pernah dipanggil firmware
+    // (siklus FILL/FERT dibuang, fertigasi ditunda) tapi pinnya tetap di-set
+    // OUTPUT + LOW di sini supaya tidak pernah menyala.
     for (int pin : {PUMP_FILL, PUMP_FERT_A, PUMP_FERT_B, PUMP_DIST}) {
         pinMode(pin, OUTPUT);
         digitalWrite(pin, MOSFET_INVERTED ? HIGH : LOW);   // LOW = off (aktif-HIGH)

@@ -1,24 +1,28 @@
 #include "irrigation.h"
 #include "config.h"
 #include "phase.h"
+#include <time.h>
 
+// ==== State machine irigasi (satu pompa: DIST) ====
+// Prototipe pakai satu pompa: DIST menarik air langsung dari penampungan utama
+// ke zona tanam. Fase FILL (isi ember) dan FERT (dosis pupuk) dibuang;
+// PUMP_FILL/PUMP_FERT_* tidak pernah dipanggil firmware.
 static IrrigPhase phase = IRRIG_IDLE;
-static unsigned long phaseStart = 0;
+static unsigned long phaseStart = 0;       // mulai fase DIST berjalan
+static unsigned long cycleDoseMs = 0;      // durasi pompa siklus yang berjalan
+static float         cycleDoseMl = 0.0f;   // dosis siklus yang berjalan
+static unsigned long lastCycleStartMs = 0; // awal siklus terakhir (jarak antar siklus)
+static bool          hasCycle = false;
 
-// Status "permintaan irigasi" terakhir. Edge-detect: siklus baru hanya
-// mulai saat permintaan naik dari FALSE ke TRUE.
-// PENTING: variabel ini TIDAK boleh static di dalam irrigationUpdate(),
-// karena irrigationAbort() (dipanggil dari luar, mis. saat sensor tidak
-// valid) tidak pernah melewati fungsi itu -> prevTrigger lama bertahan dan
-// permintaan yang masih TRUE setelah pemulihan TIDAK bisa memicu siklus
-// baru (irigasi mati permanen).
-static bool prevTrigger = false;
-// TRUE bila permintaan masih aktif saat siklus dibatalkan -> saat sensor
-// pulih, siklus langsung jalan lagi (log "dipulihkan").
-static bool resumePending = false;
+// Tracker anggaran harian: volume terkumpul + indeks hari (epoch/86400).
+// Volume bertambah saat fase DIST dimulai (dosis yang dikunci untuk siklus itu).
+static float         usedMl = 0.0f;
+static unsigned long usedDayIndex = 0;
+static bool          usedDayInit = false;
 
-// Jumlah sampel TDS invalid berturut-turut di fase FERT.
-static int fertInvalidSamples = 0;
+// Log penolakan dibatasi 1x per 60 detik per alasan (jangan spam tiap 2 s).
+static char          lastRejectKey[16] = "";
+static unsigned long lastRejectMs = 0;
 
 // ==== Tmean: rata-rata suhu sliding (ember 1 menit x 180 ember = 3 jam) ====
 // FAO-56 menetapkan Penman-Monteith sebagai metode ETo standar; Blaney-
@@ -69,22 +73,75 @@ float irrigationTmean() {
     return tmeanSum / (float)tmeanValid;
 }
 
-static void setPumps(bool fill, bool fertA, bool fertB, bool dist) {
-    digitalWrite(PUMP_FILL,   (fill   ^ MOSFET_INVERTED) ? HIGH : LOW);
-    digitalWrite(PUMP_FERT_A, (fertA  ^ MOSFET_INVERTED) ? HIGH : LOW);
-    digitalWrite(PUMP_FERT_B, (fertB  ^ MOSFET_INVERTED) ? HIGH : LOW);
-    digitalWrite(PUMP_DIST,   (dist   ^ MOSFET_INVERTED) ? HIGH : LOW);
+// ==== Dosis dari ETc ====
+float irrigationDailyBudgetMl() {
+    float etc = calculateEtc();
+    if (etc <= 0.0f) return 0.0f;                 // Tmean belum ada -> belum ada anggaran
+    return etc * IRRIG_AREA_CM2 * 0.1f;           // mm x cm2 x 0,1 = mL
 }
 
-static void nextPhase(IrrigPhase p) {
-    phase = p;
-    phaseStart = millis();
-    fertInvalidSamples = 0;
-    setPumps(false, false, false, false);
+float irrigationDoseMl() {
+    if (IRRIG_CYCLES_PER_DAY <= 0) return 0.0f;
+    return irrigationDailyBudgetMl() / (float)IRRIG_CYCLES_PER_DAY;
 }
 
-IrrigPhase irrigationPhase() {
-    return phase;
+unsigned long irrigationDoseMs() {
+    float dose = irrigationDoseMl();
+    if (dose <= 0.0f || PUMP_DIST_ML_PER_S <= 0.0f) return 0UL;
+    return (unsigned long)(dose / PUMP_DIST_ML_PER_S * 1000.0f);
+}
+
+unsigned long irrigationMinIntervalMs() {
+    if (IRRIG_CYCLES_PER_DAY <= 0) return 0UL;
+    return 86400000UL / (unsigned long)IRRIG_CYCLES_PER_DAY;   // 24 jam / siklus per hari
+}
+
+// Indeks hari untuk reset anggaran harian: epoch (WIB) supaya reset terjadi
+// tengah malam; kalau jam belum sinkron dipakai hari uptime.
+static unsigned long currentDayIndex() {
+    time_t t = time(nullptr);
+    if (t >= 100000) return (unsigned long)(t / 86400);
+    return 0x40000000UL + (millis() / 86400000UL);
+}
+
+static void budgetRollOver() {
+    unsigned long day = currentDayIndex();
+    if (!usedDayInit) {
+        usedDayInit = true;
+        usedDayIndex = day;
+        usedMl = 0.0f;
+        return;
+    }
+    if (day != usedDayIndex) {
+        usedDayIndex = day;
+        usedMl = 0.0f;
+        Serial.println("[irigasi] hari berganti: anggaran harian direset");
+    }
+}
+
+IrrigStatus irrigationStatus() {
+    IrrigStatus st;
+    st.budgetMl = irrigationDailyBudgetMl();
+    st.usedMl = usedMl;
+    st.minIntervalMs = irrigationMinIntervalMs();
+    st.doseMs = (phase == IRRIG_DIST) ? cycleDoseMs : irrigationDoseMs();
+    st.doseMl = (phase == IRRIG_DIST) ? cycleDoseMl : irrigationDoseMl();
+    return st;
+}
+
+// Penggerak pompa: hanya DIST. PUMP_FILL/PUMP_FERT_* tidak pernah disentuh.
+static void setDist(bool on) {
+    digitalWrite(PUMP_DIST, (on ^ MOSFET_INVERTED) ? HIGH : LOW);
+}
+
+// Log penolakan: 1x per 60 detik per alasan.
+static void logReject(const char* key, const char* msg) {
+    unsigned long now = millis();
+    if (strcmp(lastRejectKey, key) == 0 && (now - lastRejectMs) < 60000UL) return;
+    strncpy(lastRejectKey, key, sizeof(lastRejectKey) - 1);
+    lastRejectKey[sizeof(lastRejectKey) - 1] = '\0';
+    lastRejectMs = now;
+    Serial.println(msg);
 }
 
 bool irrigationRunning() {
@@ -92,84 +149,64 @@ bool irrigationRunning() {
 }
 
 void irrigationAbort() {
-    // Reset status "permintaan aktif" supaya permintaan yang masih TRUE
-    // setelah pemulihan sensor bisa memulai siklus baru (lihat prevTrigger).
-    if (prevTrigger) resumePending = true;
-    prevTrigger = false;
+    // Sensor tidak valid / darurat: pompa langsung dimatikan. Volume yang
+    // sudah dialirkan TIDAK dikembalikan ke tracker (airnya sudah keluar).
     if (phase != IRRIG_IDLE) {
-        Serial.println("[irigasi] siklus dibatalkan (abort) - semua pompa mati");
+        Serial.println("[irigasi] siklus dibatalkan (abort) - pompa dimatikan");
     }
-    nextPhase(IRRIG_IDLE);
+    setDist(false);
+    phase = IRRIG_IDLE;
 }
 
-void irrigationUpdate(bool trigger, float tdsPpm, bool tdsValid) {
-    // Edge-detect: 0->1 memulai siklus; trigger yang terus tinggi tidak
-    // memicu siklus kedua (satu permintaan = satu siklus).
-    if (trigger && !prevTrigger && phase == IRRIG_IDLE) {
-        if (resumePending) {
-            Serial.println("[irigasi] siklus DIPULIHKAN (permintaan masih aktif sejak gangguan)");
-            resumePending = false;
-        } else {
-            Serial.println("[irigasi] siklus dimulai (FILL -> FERT -> DIST)");
-        }
-        nextPhase(IRRIG_FILL);
-    }
-    prevTrigger = trigger;
-    // Permintaan sudah selesai -> tidak ada yang perlu "dipulihkan" lagi.
-    if (!trigger) resumePending = false;
-
+void irrigationUpdate(bool trigger) {
     unsigned long now = millis();
-    switch (phase) {
-    case IRRIG_FILL:
-        setPumps(true, false, false, false);   // 12V: penampungan -> ember campuran
-        if (now - phaseStart >= IRRIG_FILL_MS) nextPhase(IRRIG_FERT);
-        break;
+    budgetRollOver();
 
-    case IRRIG_FERT: {
-        // Probe TDS tidak terbaca sah -> dosis MALAH dilewati (fail-safe):
-        // menebak konsentrasi dari angka garbage bisa membuat over- atau
-        // underpupuk. TAPI satu sampel noisey (pompa fert berdenyut) tidak
-        // boleh menggagalkan pemupukan -> tunggu IRRIG_FERT_INVALID_LIMIT
-        // sampel invalid berturut-turut baru batalkan fase.
-        if (!tdsValid) {
-            if (++fertInvalidSamples >= IRRIG_FERT_INVALID_LIMIT) {
-                Serial.printf("[irigasi] TDS tidak valid %d sampel berturut - dosis dilewati, lanjut DIST\n",
-                              fertInvalidSamples);
-                nextPhase(IRRIG_DIST);
-                break;
-            }
-            // Masih dalam toleransi: pompa tetap berdenyut (agitasi), tapi
-            // konsentrasi TIDAK dihitung dari angka tidak valid.
+    // Syarat memulai siklus: trigger true DAN jeda minimum sudah lewat DAN
+    // (terkumpul + dosis <= anggaran harian).
+    // Permintaan yang ditahan (jeda/budget) DICoba ulang otomatis selama
+    // trigger tetap true -> tidak ada "irigasi mati permanen" seperti dulu.
+    // Override manual operator juga tunduk pada jeda & anggaran (anti over-air).
+    if (trigger && phase == IRRIG_IDLE) {
+        float   budget = irrigationDailyBudgetMl();
+        float   dose = irrigationDoseMl();
+        unsigned long doseMs = irrigationDoseMs();
+        char msg[120];
+
+        if (dose <= 0.0f || doseMs == 0UL) {
+            snprintf(msg, sizeof(msg),
+                     "[irigasi] ETc belum tersedia, irigasi ditahan");
+            logReject("etc", msg);
+        } else if (usedMl + dose > budget + 0.5f) {
+            snprintf(msg, sizeof(msg),
+                     "[irigasi] anggaran harian habis: %.0f/%.0f mL", usedMl, budget);
+            logReject("budget", msg);
+        } else if (hasCycle && (now - lastCycleStartMs) < irrigationMinIntervalMs()) {
+            unsigned long sisa = irrigationMinIntervalMs() - (now - lastCycleStartMs);
+            snprintf(msg, sizeof(msg),
+                     "[irigasi] jeda minimum belum lewat: sisa %.0f menit", sisa / 60000.0f);
+            logReject("jeda", msg);
         } else {
-            fertInvalidSamples = 0;
+            phase = IRRIG_DIST;
+            phaseStart = now;
+            cycleDoseMs = doseMs;
+            cycleDoseMl = dose;
+            lastCycleStartMs = now;
+            hasCycle = true;
+            usedMl += dose;                      // volume terkumpul hari ini
+            Serial.printf("irigasi: dose %.0f mL -> %.0f s | jeda min %.0f jam | "
+                          "anggaran harian %.0f mL, terpakai %.0f mL\n",
+                          dose, doseMs / 1000.0f,
+                          irrigationMinIntervalMs() / 3600000.0f, budget, usedMl);
         }
-        // Pulse: pompa fert nyala 2s (mengaduk larutan) -> jeda 1s (sampling TDS
-        // saat air masih bergerak dari pulse terakhir, pembacaan lebih stabil).
-        unsigned long t = now - phaseStart;
-        bool fertOn = (t % (IRRIG_FERT_PULSE_MS + IRRIG_FERT_IDLE_MS)) < IRRIG_FERT_PULSE_MS;
-        setPumps(false, fertOn, fertOn, false);   // 2x 6V: pupuk A & B -> ember
-        if (t >= IRRIG_FERT_TIMEOUT_MS) {
-            Serial.printf("[irigasi] FERT timeout, TDS tetap %.0f ppm - lanjut DIST\n", tdsPpm);
-            nextPhase(IRRIG_DIST);
-            break;
-        }
-        // Gate konsentrasi hanya boleh memakai angka TDS yang sah.
-        if (tdsValid && !fertOn && tdsPpm >= TDS_TARGET_PPM - IRRIG_TDS_HYSTERESIS) {
-            Serial.printf("[irigasi] TDS target tercapai: %.0f ppm\n", tdsPpm);
-            nextPhase(IRRIG_DIST);
-        }
-        break;
     }
 
-    case IRRIG_DIST:
-        setPumps(false, false, false, true);   // 12V: ember campuran -> tanaman
-        if (now - phaseStart >= IRRIG_DIST_MS) {
+    if (phase == IRRIG_DIST) {
+        setDist(true);
+        if (now - phaseStart >= cycleDoseMs) {
+            setDist(false);
+            phase = IRRIG_IDLE;
             Serial.println("[irigasi] siklus selesai");
-            nextPhase(IRRIG_IDLE);
         }
-        break;
-
-    default:
-        break;
     }
 }

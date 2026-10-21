@@ -43,44 +43,39 @@
 #define BLOWER_MIN_DUTY 0.20f
 #define MOSFET_INVERTED 0
 
-// Irigasi = 4 pompa dalam satu siklus (state machine di irrigation.cpp):
-// FILL -> FERT -> DIST. Semua via modul XY-MOS/MOSFET (hormati MOSFET_INVERTED).
-#define PUMP_FILL          13   // 12V: penampungan utama -> ember campuran (5-10 L)
-#define PUMP_FERT_A        14   // 5V : pupuk A -> ember (fertigasi)
-#define PUMP_FERT_B        15   // 5V : pupuk B -> ember (fertigasi)
-#define PUMP_DIST          32   // 12V: ember campuran -> tanaman
-#define IRRIG_FILL_MS      30000     // durasi isi ember (ukur debit pompa asli)
-#define IRRIG_DIST_MS      120000    // durasi alirkan ke tanaman (timer; tanpa sensor level)
-#define IRRIG_FERT_TIMEOUT_MS 120000 // safety: dosing berhenti walau TDS < target
-#define IRRIG_FERT_PULSE_MS 2000     // pompa fert nyala 2s (mengaduk) -> jeda 1s sampling
-#define IRRIG_FERT_IDLE_MS  1000
-#define IRRIG_TDS_HYSTERESIS 20.0    // toleransi di sekitar TDS_TARGET_PPM
-// Jumlah sampel TDS invalid BERURUTAN yang membatalkan fase FERT.
-// Loop controlTask 2 s -> 3 sampel ~ 6 s. Satu sampel noisey (pompa fert
-// berdenyut) tidak boleh menggagalkan pemupukan satu siklus.
-#define IRRIG_FERT_INVALID_LIMIT 3
+// Pompa irigasi. Prototipe sekarang memakai SATU pompa: DIST (12V) menarik
+// air langsung dari penampungan utama ke zona tanam.
+// PUMP_FILL / PUMP_FERT_A / PUMP_FERT_B TETAP ADA di sini dan tetap dipaksa
+// LOW di initActuators(): firmware TIDAK PERNAH memanggilnya (siklus FILL/FERT
+// dibuang, fertigasi ditunda). Jangan hapus definisi pinnya.
+#define PUMP_FILL          13   // 12V: penampungan utama -> ember campuran (TIDAK dipakai)
+#define PUMP_FERT_A        14   // 5V : pupuk A -> ember (TIDAK dipakai)
+#define PUMP_FERT_B        15   // 5V : pupuk B -> ember (TIDAK dipakai)
+#define PUMP_DIST          32   // 12V: penampungan utama -> tanaman (dipakai)
 
-// ==== KALIBRASI VOLUME IRIGASI (BELUM DIUKUR) ====
-// TODO: semua angka di bawah BELUM pernah diukur di device. Durasi pompa
-// FILL/DIST masih placeholder dari estimasi kasar (ember 5-10 L), sehingga
-// volume satu siklus bisa 10-100x kebutuhan harian tanaman.
-//
-// LANGKAH UKUR (belum dilakukan):
-//  1) Debit pompa: hitung volume yang keluar (DIST) / masuk ember (FILL)
-//     selama 30 s dengan gelas ukur, ulangi 3x, ambil rata-rata -> ml/detik.
-//  2) Luas media: ukur diameter pot/media (d, cm) -> luas = pi*d^2/4 (cm2).
-//  3) Volume harian per tanaman = ETc (mm/hari) * luas (cm2) = ml/hari;
-//     durasi DIST = volume / debit DIST.
-//  4) Isi konstanta di bawah, lalu set IRRIG_AUTO_ENABLED = 1.
-#define PUMP_FILL_ML_PER_S    0.0f    // TODO: belum diukur
-#define PUMP_DIST_ML_PER_S    0.0f    // TODO: belum diukur
-#define POTTING_AREA_CM2      0.0f    // TODO: belum diukur
-#define IRRIG_CYCLES_PER_DAY  0       // TODO: belum diukur
-#define IRRIG_EFFICIENCY      0.0f    // TODO: belum diukur
-// Gate: selama debit pompa & luas media belum diketahui, irigasi OTOMATIS
-// (keputusan fuzzy) DIMATIKAN supaya device tidak menyiram jauh melebihi
-// kebutuhan tanaman. Override manual operator tetap bisa menjalankan siklus.
-#define IRRIG_AUTO_ENABLED    0
+// ==== Kalibrasi dosis irigasi (TERUKUR 21 Okt 2026) ====
+// Debit pompa: gelas ukur + stopwatch, 3x, rata-rata.
+//   pompa DIST (dan FILL) = 31,7 mL/s ; pompa FERT = 22,2 mL/s (tidak dipakai
+//   lagi selama fertigasi ditunda, dicatat untuk mengaktifkan kembali).
+// Cara ukur ulang: letakkan gelas ukur di outlet pompa, nyalakan pompa,
+// catat volume setelah 30 s, ulangi 3x, ambil rata-rata -> mL/detik.
+#define PUMP_DIST_ML_PER_S   31.7f
+// Luas wetted zona: 10 polybag 30x30 cm, 2 baris -> 900 cm2 per tanaman
+// (asumsi: permukaan atas polibag = area wetted), total 9000 cm2.
+// Cara ukur ulang: hitung luas dasar tiap polybag (pi * d^2 / 4 dengan d =
+// diameter polybag) x jumlah polybag.
+#define IRRIG_AREA_CM2       9000.0f
+// Jumlah siklus irigasi per hari. Dosis per siklus = anggaran harian / nilai
+// ini, jeda minimum antar siklus = 24 jam / nilai ini.
+// Cara tetapkan: dari kebutuhan harian (ETc x area) dan debit pompa -> bagi
+// jadi beberapa dosis kecil supaya tidak ada siram besar sekaligus.
+#define IRRIG_CYCLES_PER_DAY 2
+// Gate irigasi otomatis: 1 = keputusan fuzzy boleh menyalakan pompa.
+// 0 = irigasi otomatis dimatikan (siklus manual tetap bisa); dipakai sebelum
+// debit & luas media tersedia. Badge status " IRIGOFF" muncul saat 0.
+#define IRRIG_AUTO_ENABLED   1
+// Catatan: asumsi efisiensi irigasi 1,0 (volume keluar pompa = volume sampai
+// media), jadi TIDAK ada konstanta efisiensi terpisah.
 
 // MicroSD (SPI, pin default VSPI ESP32: SCK 18, MISO 19, MOSI 23, CS 5).
 // Backup lokal: seluruh log + antrian saat push Firebase gagal.
@@ -149,6 +144,9 @@
 // TDS Meter v1.0 (analog, klon DFRobot SEN0244) di ember campuran irigasi.
 // Output ~0..2.3V. GPIO35 = ADC input-only tanpa pull-up. Kompensasi suhu
 // memakai suhu SHT31. Kalibrasi: TDS_CAL_K (set dengan larutan standar).
+// CATATAN: TDS sekarang hanya TELEMETRI (dashboard). Dosis pupuk memakai
+// pompa FERT yang ditunda, jadi TDS_TARGET_PPM belum dipakai menghitung
+// dosis apa pun; dipakai lagi saat fertigasi diaktifkan kembali.
 #define TDS_PIN         35
 #define TDS_ADC_MAX     4095.0
 #define TDS_REF_VOLT    3.3

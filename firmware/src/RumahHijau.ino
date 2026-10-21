@@ -19,7 +19,7 @@
 // controlTask (core 1): sensor -> VPD/ETc -> fuzzy -> aktuator -> irigasi -> LCD -> SD.
 // netTask (core 0): WiFi, token, push RTDB, poll perintah, backlog SD.
 // Tujuan: I/O jaringan (TLS bisa beberapa detik, WiFi join s/d WIFI_TIMEOUT)
-// tidak lagi menahan jalur aktuator — pulse pompa FERT 2s/1s tidak lagi
+// tidak lagi menahan jalur aktuator -> siklus irigasi (pompa DIST) tidak
 // korup karena loop tertahan saat HTTP.
 static const int CONTROL_TASK_STACK = 4096;
 static const int NET_TASK_STACK = 10240;   // TLS mbedTLS butuh stack besar
@@ -37,6 +37,7 @@ struct Snapshot {
     char  status[96];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
     PhaseState phase;   // setelan fase + VPD target (untuk telemetri DB)
     OverrideState ov;   // status override manual per aktuator (sakelar dashboard)
+    IrrigStatus irig;   // dosis/durasi/anggaran irigasi (telemetri DB)
 };
 
 static Snapshot gSnap;
@@ -135,7 +136,6 @@ static void controlTask(void* arg) {
     unsigned long lastFailPrint = 0;
     unsigned long lastGatePrint = 0;
     TickType_t lastWake = xTaskGetTickCount();
-    IrrigPhase prevIrrigPhase = IRRIG_IDLE;
 
     // Fail-safe I2C nyangkut: subscribe controlTask ke Task WDT. WDT di-init
     // eksplisit di setup() (framework arduino-esp32 2.0.17 / ESP-IDF 4.4 TIDAK
@@ -175,22 +175,8 @@ static void controlTask(void* arg) {
             sensorData.soilMoisture = 50.0f;
         }
 
-        // TDS juga difilter, karena inilah kanal paling bising: pompa fert
-        // berdenyut 2 s on / 1 s off sementara loop baca tiap 2 s, jadi dua
-        // iterasi berurutan menangkap kondisi adukan yang berbeda. Diuji dengan
-        // konsentrasi naik 400->1060 ppm dan noise denyut: pembacaan mentah
-        // melewati gate saat konsentrasi asli baru 820 ppm (fase FERT berhenti
-        // terlalu awal, underpupuk), yang terfilter baru di 1060 ppm. Timeout
-        // 120 detik tetap menjadi pengaman atas (filter menambah ~8 detik).
-        // Reset tiap siklus masuk FERT hanya pengaman tambahan: setelah fase FILL
-        // 30 detik (15 iterasi) residual filter tinggal ~403 ppm, jadi nilainya
-        // sudah hampir habis - yang diluted reset adalah FILL yang dipendekkan
-        // atau siklus yang dibatalkan di tengah FERT.
-        IrrigPhase irrigPhase = irrigationPhase();
-        if (irrigPhase == IRRIG_FERT && prevIrrigPhase != IRRIG_FERT) emaReset(tdsFilter);
-        prevIrrigPhase = irrigPhase;
-        // TDS: hanya nilai sah yang masuk filter (probe dicabut -> jangan
-        // meracuni filter dengan angka garbage).
+        // TDS hanya telemetri (dashboard); dosis pupuk memakai pompa FERT yang
+        // ditunda. Nilainya tetap difilter EMA supaya angka yang tampil stabil.
         bool tdsValid = false;
         float tdsSample = readTDS(sensorData.temperature, &tdsValid);
         if (tdsValid) tdsPpm = emaUpdate(tdsFilter, tdsSample);
@@ -233,7 +219,7 @@ static void controlTask(void* arg) {
                               soilRaw);
             }
             if (!tdsValid) {
-                Serial.println("[!] TDS tidak terbaca sah - dosis pupuk dilewati");
+                Serial.println("[!] TDS tidak terbaca sah - TDS hanya telemetri");
             }
         }
 
@@ -291,19 +277,20 @@ static void controlTask(void* arg) {
         OverrideState ov = controlOverrides();
         setActuators(mist, blower, blowerLevel);
 
-        // Irigasi 4-pompa: sensor SHT31 mati = batalkan siklus (fail-safe
-        // penuh: tanpa T/RH tidak ada ETc/VPD yang sah, override manual pun
-        // tidak boleh mengecualikan device dari fail-safe ini); selain itu
-        // serah ke fuzzy (edge-trigger di irrigationUpdate — cycle sekali per
-        // permintaan). Sakelar manual yang dimatikan TIDAK lagi membatalkan
-        // siklus: override manual per aktuator, jadi mematikan sakelar berarti
-        // kembali ke fuzzy.
+        // Irigasi (siklus DIST saja): sensor SHT31 mati = batalkan siklus
+        // (fail-safe penuh: tanpa T/RH tidak ada ETc/VPD yang sah, override
+        // manual pun tidak boleh mengecualikan device dari fail-safe ini);
+        // selain itu serah ke irrigationUpdate() yang memutuskan mulai/tidak
+        // siklus dari trigger + jeda minimum + anggaran harian.
+        // Sakelar manual yang dimatikan TIDAK lagi membatalkan siklus: override
+        // manual per aktuator, jadi mematikan sakelar berarti kembali ke fuzzy.
         if (!sensorData.valid) {
             irrigationAbort();
         } else {
-            irrigationUpdate(irigasi, tdsPpm, tdsValid);
+            irrigationUpdate(irigasi);
         }
         bool irigasiRunning = irrigationRunning();
+        IrrigStatus irig = irrigationStatus();
 
         // Nilai yang dilaporkan (serial, LCD, RTDB). Sensor yang tidak
         // terbaca dilaporkan NaN -> field-nya dibuang saat push (dashboard
@@ -367,6 +354,7 @@ static void controlTask(void* arg) {
         s.irigasiRunning = irigasiRunning;
         s.blowerLevel = blowerLevel;   // keluaran fuzzy yang jadi perintah PWM
         s.ov = ov;
+        s.irig = irig;
         // status_sistem = status fuzzy + penanda aktuator hidup + penanda
         // kegagalan sensor/jam. Dashboard membaca string ini (pill + tabel),
         // jadi penanda kegagalan harus ikut di sini.
@@ -426,7 +414,7 @@ static void netTask(void* arg) {
                 bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
                                         s.vpd, s.etc, s.tds, s.blowerLevel, s.mist,
                                         s.irigasiRunning, s.status, s.manual, s.phase,
-                                        s.ov, s.tmean, &body);
+                                        s.ov, s.tmean, s.irig, &body);
                 if (ok) {
                     sdFlushBacklog();   // pulih: kirim antrean yang tertunda
                 } else if (body.length() > 0) {
