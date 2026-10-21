@@ -94,6 +94,10 @@ const warnPill = 'pill pill-warn';
                 <span v-if="log.flags.soilErr" :class="errPill">SOILERR</span>
                 <span v-if="log.flags.tdsErr" :class="errPill">TDSERR</span>
                 <span v-if="log.flags.noSync" :class="warnPill">NOSYNC</span>
+                <!-- IRRIGOFF = irigasi otomatis sengaja dimatikan perangkat, bukan
+                     kegagalan sensor -> warna peringatan, bukan merah. -->
+                <span v-if="log.flags.irrigOff" :class="warnPill"
+                      title="Irigasi otomatis dimatikan di perangkat (belum dikalibrasi). Perintah manual tetap jalan.">IRRIGOFF</span>
               </td>
             </tr>
           </template>

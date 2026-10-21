@@ -63,6 +63,16 @@ const ovOf = k => a.value.override[k] || 'auto';
       <span class="block text-muted">Override expires sendiri setelah 10 menit, lalu aktuator kembali ke fuzzy.</span>
     </div>
 
+    <!-- IRRIGOFF: irigasi otomatis sengaja dimatikan di perangkat (debit pompa
+         belum dikalibrasi). Ini kondisi yang disengaja, bukan gangguan —
+         tampil juga untuk tamu karena menyangkut kondisi perangkat. -->
+    <div
+      v-if="state.lastData && state.lastData.flags && state.lastData.flags.irrigOff"
+      class="mb-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[11.5px] leading-snug text-warn"
+    >
+      <b>Irigasi otomatis dimatikan di perangkat</b> — debit pompa belum dikalibrasi. Perintah manual tetap bisa dijalankan.
+    </div>
+
     <div class="flex flex-col gap-2">
       <div v-for="it in items" :key="it.key" class="flex items-center gap-2.5 rounded-lg border border-border bg-card-2 px-3.5 py-2.5">
         <svg class="shrink-0 text-accent" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path v-for="(p, pi) in it.icon" :key="pi" :d="p.d" :transform="p.t" /></svg>

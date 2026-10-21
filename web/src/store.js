@@ -97,9 +97,10 @@ export function humanAge(sec) {
 // ------------------------------------------------------------ normalisasi ---
 // Kontrak data firmware (lihat firmware/src/firebase_db.cpp):
 //   ts (epoch, HANYA bila NTP sinkron), time_synced (bool), temperature,
-//   humidity, soil, vpd, et0 (nilai ETc), tds, blower_level, misting, irigasi,
-//   status_sistem, manual_mode, fase, vpd_target, fase_aktif, fase_durasi_s,
-//   fase_elapsed_s, fase_sisa_s, device.
+//   humidity, soil, vpd, etc (nilai ETc, dikirim juga sebagai et0), tds,
+//   blower_level, misting, irigasi, status_sistem, manual_mode,
+//   mist_ov / irig_ov / blower_ov, fase, vpd_target, fase_aktif,
+//   fase_durasi_s, fase_elapsed_s, fase_sisa_s, kc_aktif, tmean_c, device.
 // Field yang tidak terbaca TIDAK dikirim sama sekali (firmware membuang NaN),
 // jadi "tidak ada" != 0 — harus tampil "-", bukan angka nol palsu.
 const numOrNull = v => (typeof v === 'number' && isFinite(v)) ? v : null;
@@ -119,8 +120,11 @@ function parseOverride(v) {
   }
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase();
+    // Firmware mengirim string: "auto" (ikut fuzzy), "manual" (paksa nyala),
+    // "forced" (paksa mati). Angka & boolean tetap diterima supaya log lama
+    // (yang belum punya field ini) tidak salah baca.
     if (['on', '1', 'true', 'manual', 'force', 'paksa'].includes(s)) return 'on';
-    if (['off', '0', 'false'].includes(s)) return 'off';
+    if (['off', '0', 'false', 'forced'].includes(s)) return 'off';
     if (['auto', '-1', 'fuzzy'].includes(s)) return 'auto';
   }
   return null;
@@ -178,6 +182,10 @@ export function normLog(l, key) {
       soilErr: status.includes('SOILERR'),
       tdsErr: status.includes('TDSERR'),
       noSync: status.includes('NOSYNC') || !synced,
+      // IRRIGOFF = perangkat SENGAJA menonaktifkan irigasi otomatis (mis. debit
+      // pompa & luas media belum dikalibrasi), BUKAN gangguan. Perintah
+      // manual tetap jalan.
+      irrigOff: status.includes('IRRIGOFF'),
     },
     phase: {
       name: typeof src.fase === 'string' ? src.fase : null,
@@ -368,8 +376,13 @@ export const pillClass = s =>
 // --------------------------------------------------------- perintah RTDB ---
 // Firmware membaca commands/{DEVICE_ID}/{entri} = {action, value, unit?}
 // (pollCommands() mengambil anak paling lama lalu menghapus entri itu).
-// Menulis objek {action, value} LANGSUNG ke commands/{DEVICE_ID} tidak bisa
-// dibaca firmware: node itu dibaca sebagai daftar entri, bukan satu perintah.
+// Entri ditulis sebagai ANAK dengan kunci eksplisit (mirip push-ID) supaya
+// urutannya jelas dan tidak bergantung pada push-ID yang dibuat server.
+// Catatan: bentuk lama (POST {action, value} ke commands/{DEVICE_ID}) juga
+// sebenarnya bisa dibaca firmware, karena POST di REST Firebase setara
+// push() — objek itu berakhir sebagai anak ber-push-ID. Kunci eksplisit
+// dipilih agar antrean perintah jelas urutannya, bukan karena bentuk lama
+// tidak terbaca.
 const CMD_TIMEOUT_MS = 40000;   // poll 5 s + push 20 s + fetch 10 s + buffer
 
 // Kunci entri perintah: mirip push-ID Firebase (urut waktu, unik).

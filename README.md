@@ -12,24 +12,33 @@ Realtime Database.
 Layout: satu topbar biru solid, tanpa sidebar. Greenhouse yang dipantau dan
 dikontrol dipilih lewat tombol di topbar — isi tombol itu **kapan data terakhir
 masuk** (`2 hari 16 jam`), dan warnanya menandakan kondisi: hijau = data segar,
-kuning = basi kurang dari sehari, merah = basi lebih dari sehari atau gagal
-dibaca. Navigasi cukup satu tombol **Log Sensor**: klik membuka histori, klik
-lagi kembali ke Beranda. Seluruh tampilan mengikuti satu skema warna (Material
-Blue berpusat di `#1565C0`) yang didefinisikan sebagai token Tailwind di
-`web/src/style.css`; hijau dan merah diambil dari warna ON/OFF aktuator, dan
-grafik membaca variabel warna yang sama.
+kuning = basi kurang dari sehari atau jam perangkat belum sinkron, merah = basi
+lebih dari sehari atau gagal dibaca. Navigasi cukup satu tombol **Log Sensor**:
+klik membuka histori, klik lagi kembali ke Beranda. Seluruh tampilan mengikuti
+satu skema warna (Material Blue berpusat di `#1565C0`) yang didefinisikan
+sebagai token Tailwind di `web/src/style.css`; hijau dan merah diambil dari
+warna ON/OFF aktuator, dan grafik membaca variabel warna yang sama.
 
 **Beranda** menampilkan enam metrik real-time (suhu, kelembapan, kandungan air
-tanah, VPD, ET0, dan TDS) dalam dua kolom × tiga baris. Pada monitor lebar
+tanah, VPD, ETc, dan TDS) dalam dua kolom × tiga baris. Pada monitor lebar
 (≥ 900 px) kartu **Kontrol Aktuator** berdiri tepat di sebelahnya, sedangkan
 kartu **Grafik Tren Sensor** (20 titik terakhir, tombol Refresh) membentang
 penuh di bawah keduanya; nama greenhouse yang dipantau menyambung di judul
 kartu, jadi tidak lagi memakai chip terpisah. Di ponsel semuanya menjadi satu
 kolom: metrik → kontrol → grafik.
 
-Kartu kontrol memuat satu baris per aktuator (Misting, Irigasi, Blower, Auto)
-dengan status ON/OFF dan sakelarnya. Kartu ini terlihat untuk semua orang, tapi
-**sakelarnya hanya muncul setelah login admin**.
+Kartu kontrol memuat satu baris per aktuator (Misting, Irigasi, Blower).
+Sakelarnya menampilkan status **override** — Auto (ikut fuzzy) atau Paksa nyala
+— sedangkan status ON/OFF di sebelahnya menunjukkan apa yang sedang berjalan.
+Mematikan sakelar berarti override dilepas (kembali ke fuzzy), bukan "paksa
+mati", dan setiap override kedaluwarsa sendiri setelah 10 menit. Tombol
+**Kembali ke Auto** melepas override semua aktuator sekaligus. Kartu ini
+terlihat untuk semua orang, tapi **sakelarnya hanya muncul setelah login
+admin**.
+
+Panel **Fase & Setpoint VPD** (target VPD, nama fase, durasi, reset
+penghitung, nonaktifkan setpoint) hanya untuk admin, dan menampilkan nilai
+yang diminta berdampingan dengan nilai yang sudah terpasang di perangkat.
 
 ![Tampilan ponsel](docs/mobile.png)
 
@@ -55,6 +64,11 @@ manual atau mengelola greenhouse, klik avatar **Tamu** → **Login**.
 | Tamu | tanpa akun | baca metrik, grafik, log, dan status aktuator |
 | Admin | `mr.pman@mail.unnes.ac.id` | + sakelar kontrol aktuator & ganti nama greenhouse |
 | Perangkat | satu akun per ESP32 | push sensor, terima perintah |
+
+Status gangguan perangkat tampil sebagai badge di tabel log: `SOILERR` dan
+`TDSERR` (sensor tidak terbaca), `NOSYNC` (jam perangkat belum sinkron), dan
+`IRRIGOFF` — irigasi otomatis dimatikan perangkat sampai debit pompa
+dikalibrasi, sementara perintah manual tetap jalan.
 
 Cukup dua jenis akun: **admin** dan **ESP32**. Tulis (kontrol & label) dijaga
 RTDB rules lewat allowlist UID; pembacaan dibuka publik karena isinya hanya
