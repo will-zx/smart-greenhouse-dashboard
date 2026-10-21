@@ -6,9 +6,15 @@
     <title>Smart Greenhouse Dashboard</title>
     <link rel="icon" type="image/png" href="/greenhouse.png">
     <!-- Firebase compat tetap dimuat lewat CDN sebagai global (window.firebase),
-         bukan di-bundle Vite. Script non-ESM di index.html tidak disentuh Vite. -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+         bukan di-bundle Vite. Script non-ESM di index.html tidak disentuh Vite.
+         Subresource Integrity (SRI) + crossorigin: file dari gstatic tidak
+         boleh berubah diam-diam (versi 9.23.0 dikunci lewat hash-nya). -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"
+            integrity="sha384-ajMUFBUFMCyjh8uxJg6bkGcKe9RTolyjwbxB3yES0QQMenP3Oztj/W9vA2SJPcIh"
+            crossorigin="anonymous"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"
+            integrity="sha384-xD1t9dGSVKobUztxDkv6xUI0H4AnFz0NxwlgDJJ7FDlblG9xxr1Z9iauCZuJYj6p"
+            crossorigin="anonymous"></script>
     <script src="/config.js"></script>
 </head>
 <body>

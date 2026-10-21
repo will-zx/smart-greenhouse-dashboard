@@ -22,10 +22,9 @@ export const state = reactive({
   currentZone: 0,
   labels: {},
 
-  // data sensor
+  // data sensor — baris sudah dinormalisasi (lihat normLog)
   logData: [],
   lastData: null,
-  optimistic: null,
   logFilter: '',
   logLimit: 20,
 
@@ -37,11 +36,16 @@ export const state = reactive({
   zoneMenuOpen: false,
   zoneMsg: { text: '', ok: false, show: false },
   cmdStatus: '',
+  cmdError: '',
+  // perintah yang sudah terkirim tapi belum dikonfirmasi perangkat
+  pending: null,
   spinning: false,
 
   // koneksi
   online: false,
-  age: 0,
+  // umur data (detik). null = record terakhir tidak punya field ts, jadi
+  // jam perangkat belum sinkron — BUKAN "NaN menit" dan bukan pill hijau.
+  age: null,
   loadError: '',
 
   // rename inline
@@ -60,7 +64,7 @@ export const fmtNum = (v, d = 2) => (typeof v === 'number' && isFinite(v)) ? v.t
 export const saneSoil = v => (typeof v === 'number' && v > 5 && v < 95) ? v : null;
 
 export function fmtClock(ts) {
-  if (typeof ts !== 'number' || ts < 100000) return '-';
+  if (typeof ts !== 'number' || ts < 100000) return '?';
   // Detik ikut karena ESP32 push tiap ~20 s: tanpa ini dua titik berdekatan
   // sering jatuh di menit yang sama dan label sumbu X terulang.
   return new Date(ts * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(/\./g, ':');
@@ -76,7 +80,10 @@ export function fmtLogTime(ts) {
 // unit yang lebih kecil ("2 hari 15 jam"). Satu fungsi supaya label "diam ..."
 // di topbar dan "Data terakhir ..." di grafik tidak pernah beda format.
 // Floor, bukan round: 1439 menit harus tetap "23 jam 59 menit", bukan "24 jam".
+// sec null = tidak bisa dihitung (tidak ada ts) -> "—", BUKAN "0 detik".
 export function humanAge(sec) {
+  if (sec === null || sec === undefined || !isFinite(sec)) return '—';
+  if (sec < 0) return '0 detik';
   if (sec < 60) return sec + " detik";
   const m = Math.floor(sec / 60);
   if (m < 60) return m + " menit";
@@ -85,6 +92,108 @@ export function humanAge(sec) {
   if (h < 24) return h + (sisaM ? " jam " + sisaM + " menit" : " jam");
   const sisaH = h % 24;
   return Math.floor(h / 24) + " hari" + (sisaH ? " " + sisaH + " jam" : "");
+}
+
+// ------------------------------------------------------------ normalisasi ---
+// Kontrak data firmware (lihat firmware/src/firebase_db.cpp):
+//   ts (epoch, HANYA bila NTP sinkron), time_synced (bool), temperature,
+//   humidity, soil, vpd, et0 (nilai ETc), tds, blower_level, misting, irigasi,
+//   status_sistem, manual_mode, fase, vpd_target, fase_aktif, fase_durasi_s,
+//   fase_elapsed_s, fase_sisa_s, device.
+// Field yang tidak terbaca TIDAK dikirim sama sekali (firmware membuang NaN),
+// jadi "tidak ada" != 0 — harus tampil "-", bukan angka nol palsu.
+const numOrNull = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+
+// Status override per aktuator:
+//   'auto'   -> ikut fuzzy (tidak ada override)
+//   'on'     -> paksa nyala
+//   'off'    -> paksa mati
+//   'unknown'-> ada override tapi perangkat tidak melaporkan aktuator mana
+function parseOverride(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'boolean') return v ? 'on' : 'off';
+  if (typeof v === 'number') {
+    if (v > 0) return 'on';
+    if (v === 0) return 'off';
+    return 'auto';      // -1 = ikut fuzzy
+  }
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (['on', '1', 'true', 'manual', 'force', 'paksa'].includes(s)) return 'on';
+    if (['off', '0', 'false'].includes(s)) return 'off';
+    if (['auto', '-1', 'fuzzy'].includes(s)) return 'auto';
+  }
+  return null;
+}
+
+// Override per aktuator.
+// Firmware 61d1bad: override manual TRIS-TATA per aktuator (-1 ikut fuzzy,
+// 0 paksa mati, 1 paksa nyala), tapi yang dikirim ke RTDB baru flag
+// manual_mode + (belum) field per aktuator. Kalau field per aktuator
+// (mist_ov / irig_ov / blower_ov) ada, itu yang dipakai.
+// Fallback untuk firmware lama: manual_mode = SATU bitmask untuk semua
+// aktuator, jadi status aktuator = status override-nya.
+// Firmware baru hanya meng-override SATU aktuator → tanpa field per aktuator
+// kita tidak bisa menebak yang mana, jadi 'unknown' (jujur, bukan menebak).
+function overrideState(l, field, running) {
+  const st = parseOverride(l[field]);
+  if (st) return st;
+  if (l.manual_mode !== true) return 'auto';
+  const firmwareBaru = 'time_synced' in l || 'fase_aktif' in l || 'blower_level' in l;
+  if (firmwareBaru) return 'unknown';
+  return running ? 'on' : 'off';
+}
+
+export function normLog(l, key) {
+  const src = l || {};
+  const status = typeof src.status_sistem === 'string' ? src.status_sistem : '';
+  const hasTs = typeof src.ts === 'number' && src.ts >= 100000;
+  // time_synced hanya ada di firmware baru; di firmware lama absen = dianggap
+  // sinkron bila ts ada.
+  const synced = hasTs && src.time_synced !== false;
+  const level = numOrNull(src.blower_level);
+  const etc = numOrNull(src.etc !== undefined && src.etc !== null ? src.etc : src.et0);
+
+  const row = {
+    _key: key,
+    ts: hasTs ? src.ts : null,
+    synced,
+    device: typeof src.device === 'string' ? src.device : '',
+    temperature: numOrNull(src.temperature),
+    humidity: numOrNull(src.humidity),
+    soil: numOrNull(src.soil),
+    vpd: numOrNull(src.vpd),
+    etc,
+    tds: numOrNull(src.tds),
+    blowerLevel: level,
+    // Status aktuator SESUNGGUHNYA (yang sedang berjalan) — terpisah dari
+    // override. Sakelar memakai override, operator perlu tahu yang berjalan.
+    misting: typeof src.misting === 'boolean' ? src.misting : status.includes('MISTING'),
+    irigasi: typeof src.irigasi === 'boolean' ? src.irigasi : status.includes('IRIGASI'),
+    blower: level !== null ? level > 0 : status.includes('BLOWER'),
+    status,
+    manual: src.manual_mode === true,
+    flags: {
+      sensorError: /sensor error/i.test(status),
+      soilErr: status.includes('SOILERR'),
+      tdsErr: status.includes('TDSERR'),
+      noSync: status.includes('NOSYNC') || !synced,
+    },
+    phase: {
+      name: typeof src.fase === 'string' ? src.fase : null,
+      target: numOrNull(src.vpd_target),
+      active: src.fase_aktif === true,
+      duration: numOrNull(src.fase_durasi_s),
+      elapsed: numOrNull(src.fase_elapsed_s),
+      remaining: numOrNull(src.fase_sisa_s),
+    },
+  };
+  row.override = {
+    mist: overrideState(src, 'mist_ov', row.misting),
+    irigasi: overrideState(src, 'irig_ov', row.irigasi),
+    blower: overrideState(src, 'blower_ov', row.blower),
+  };
+  return row;
 }
 
 // ------------------------------------------------------------------ zona ---
@@ -145,34 +254,31 @@ export async function fetchDataLogs() {
 
     // Urut berdasarkan ts, bukan kunci push-ID. Kunci RTDB urut saat apa yang
     // ditulis, tapi record lama yang diputar ulang dari backlog MicroSD tetap
-    // dapat kunci baru - jadi kunci != waktu. Urut ts juga membetulkan
-    // kolom waktu di tabel (terbaru di atas) dan sumbu X grafik.
-    const data = Object.values(obj).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    // dapat kunci baru - jadi kunci != waktu. Record TANPA ts (jam perangkat
+    // belum sinkron) diletakkan di akhir: mereka yang terbaru.
+    const rows = Object.entries(obj).map(([k, v]) => normLog(v, k));
+    rows.sort((a, b) => {
+      const at = a.ts === null ? Infinity : a.ts;
+      const bt = b.ts === null ? Infinity : b.ts;
+      if (at === bt) return 0;
+      return at - bt;
+    });
 
-    state.lastData = data[data.length - 1];
+    state.lastData = rows[rows.length - 1] || null;
     if (!state.lastData) throw new Error('kosong');
 
-    // Device sudah push log yang mencerminkan perintah kita -> tampilan
-    // optimistis tidak diperlukan lagi. Kalau belum, tahan sampai batas
-    // waktu (poll perintah 5 s + push 20 s + fetch 10 s) supaya switch
-    // tidak balik sendiri ke posisi lama.
-    if (state.optimistic) {
-      if (state.lastData.manual_mode === state.optimistic.manual_mode) {
-        state.optimistic = null;
-      } else if (Date.now() < state.optimistic.until) {
-        Object.assign(state.lastData, state.optimistic);
-      } else {
-        state.optimistic = null;
-      }
-    }
+    state.logData = rows;
 
-    state.logData = data;
     // Offline bukan cuma fetch gagal: log terakhir yang basi juga berarti
     // ESP32 yang hidup tapi tidak push (padam/offline).
-    const age = Math.floor(Date.now() / 1000) - state.lastData.ts;
+    state.age = state.lastData.ts === null
+      ? null
+      : Math.floor(Date.now() / 1000) - state.lastData.ts;
     state.online = true;
-    state.age = age;
     state.loadError = '';
+
+    // Perintah yang terkirim: konfirmasi (dari nilai terpasang) atau gagal.
+    checkPending();
   } catch (err) {
     console.error("Gagal memuat data:", err.message);
     state.online = false;
@@ -192,107 +298,284 @@ export function stopPolling() {
   timer = null;
 }
 
-// -------------------------------------------------------------- turunan ---
-// Sumber kebenaran posisi sakelar: field keluaran fuzzy. Log lama (sebelum
-// field ini dikirim) masih jatuh ke status_sistem.
+// ------------------------------------------------------------- kendali ---
+// Nama aktuator -> label Indonesia (dipakai di pesan).
+const ACT_NAMES = { mist: 'Misting', irigasi: 'Irigasi', blower: 'Blower' };
+
+// Status override yang tampil: dari perangkat, ditambah efek optimistis selama
+// perintah masih menunggu konfirmasi. Optimistik HANYA boleh mengubah tampilan
+// OVERRIDE — status aktuator (ON/OFF) selalu dari perangkat, supaya dashboard
+// tidak pernah mengarang apa yang sedang berjalan.
+export const overrideStates = computed(() => {
+  const base = state.lastData
+    ? state.lastData.override
+    : { mist: 'auto', irigasi: 'auto', blower: 'auto' };
+  const eff = { ...base };
+  const p = state.pending;
+  if (p) {
+    if (p.action === 'auto') {
+      eff.mist = 'auto'; eff.irigasi = 'auto'; eff.blower = 'auto';
+    } else if (p.action in eff) {
+      eff[p.action] = p.value ? 'on' : 'auto';
+    }
+  }
+  return eff;
+});
+
+// Ringkasan override manual: aktuator mana yang sedang di-override.
+export const manualInfo = computed(() => {
+  const ov = overrideStates.value;
+  const items = [];
+  for (const k of ['mist', 'irigasi', 'blower']) {
+    if (ov[k] === 'on') items.push({ key: k, name: ACT_NAMES[k], mode: 'paksa nyala' });
+    else if (ov[k] === 'off') items.push({ key: k, name: ACT_NAMES[k], mode: 'paksa mati' });
+  }
+  const unknown = Object.values(ov).includes('unknown');
+  return { items, unknown, any: items.length > 0 || unknown };
+});
+
+// Sumber kebenaran posisi sakelar: status OVERRIDE per aktuator (bukan status
+// aktuator). Log lama (sebelum field override dikirim) jatuh ke heuristik
+// manual_mode.
 export const actuators = computed(() => {
   const d = state.lastData;
-  if (!d) return { mist: false, irigasi: false, blower: false, auto: true, level: null };
-  const s = d.status_sistem || "";
-  const on = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
-  const level = typeof d.blower_level === 'number' ? d.blower_level : null;
+  const ov = overrideStates.value;
+  if (!d) {
+    return { mist: false, irigasi: false, blower: false, level: null, override: ov, manual: false, status: '', flags: null };
+  }
   return {
-    mist: on(d.misting, s.includes("MISTING")),
-    irigasi: on(d.irigasi, s.includes("IRIGASI")),
-    // Blower hidup bila tingkatnya > 0 (PWM); tidak ada field boolean terpisah.
-    blower: level !== null ? level > 0 : s.includes("BLOWER"),
-    level,
-    auto: d.manual_mode !== true,
+    mist: d.misting,
+    irigasi: d.irigasi,
+    blower: d.blower,
+    level: d.blowerLevel,
+    override: ov,
+    manual: d.manual,
+    status: d.status,
+    flags: d.flags,
   };
 });
 
 export const filteredLogs = computed(() => {
   const f = state.logFilter;
   if (!f) return state.logData;
-  return state.logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.status_sistem || '')).toLowerCase().includes(f));
+  return state.logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.status || '')).toLowerCase().includes(f));
 });
 
 // Badge status aktif mengikuti isi teksnya, bukan warnanya.
 export const pillClass = s =>
   (s.includes("MISTING") || s.includes("BLOWER") || s.includes("IRIGASI")) ? 'pill pill-on' : 'pill pill-idle';
 
-// ------------------------------------------------------------- kendali ---
-// Terapkan perintah ke tampilan segera. Sumber kebenaran tetap perangkat;
-// ini hanya jembatan sampai log baru (yang memuat manual_mode/status_sistem)
-// tiba — lihat penahan `optimistic` di fetchDataLogs().
-function applyLocalCommand(action, value) {
-  if (!state.lastData) return;
-  let manual = true;
-  let status = state.lastData.status_sistem || "";
-  if (action === "auto") {
-    manual = false;   // controlRelease() -> kembali ke fuzzy
-  } else {
-    const kw = action === "irigasi" ? "IRIGASI" : (action === "blower" ? "BLOWER" : "MISTING");
-    if (value) {
-      if (!status.includes(kw)) status += " " + kw;
-    } else {
-      status = status.split(" " + kw).join("");
+// --------------------------------------------------------- perintah RTDB ---
+// Firmware membaca commands/{DEVICE_ID}/{entri} = {action, value, unit?}
+// (pollCommands() mengambil anak paling lama lalu menghapus entri itu).
+// Menulis objek {action, value} LANGSUNG ke commands/{DEVICE_ID} tidak bisa
+// dibaca firmware: node itu dibaca sebagai daftar entri, bukan satu perintah.
+const CMD_TIMEOUT_MS = 40000;   // poll 5 s + push 20 s + fetch 10 s + buffer
+
+// Kunci entri perintah: mirip push-ID Firebase (urut waktu, unik).
+let seq = 0;
+function cmdKey() {
+  seq = (seq + 1) % 1000;
+  return '-' + Date.now().toString(36) + String(seq).padStart(3, '0') +
+    Math.random().toString(36).slice(2, 8);
+}
+
+// Label perintah untuk pesan di UI.
+function cmdLabel(cmd) {
+  if (cmd.action === 'auto') return 'Kembali ke Auto';
+  if (cmd.action === 'set_vpd') return 'Target VPD';
+  if (cmd.action === 'set_fase') return cmd.value ? 'Nama fase' : 'Nonaktifkan setpoint';
+  if (cmd.action === 'set_durasi') return 'Durasi fase';
+  if (cmd.action === 'fase_reset') return 'Reset penghitung fase';
+  return ACT_NAMES[cmd.action] || cmd.action;
+}
+
+// Apakah perangkat sudah mengeksekusi perintah ini? Konfirmasi diambil dari nilai
+// yang DIPUSH perangkat (override terpasang / nilai fase terpasang), bukan dari
+// balasan HTTP — HTTP 200 cuma berarti "perintah sampai ke RTDB".
+function cmdConfirmed(cmd, row) {
+  if (!row) return false;
+  switch (cmd.action) {
+    case 'auto':
+      return row.manual === false;
+    case 'mist': case 'irigasi': case 'blower': {
+      const ov = row.override[cmd.action];
+      if (ov === 'on' || ov === 'off' || ov === 'auto') {
+        return cmd.value ? ov === 'on' : ov !== 'on';
+      }
+      // 'unknown' (firmware tanpa status override per aktuator): konfirmasi
+      // paling banter dari status aktuator saat ini.
+      return cmd.value ? row[cmd.action === 'mist' ? 'misting' : cmd.action] === true : row.manual === false;
     }
+    case 'set_vpd':
+      return row.phase.target !== null && Math.abs(row.phase.target - cmd.value) < 0.01;
+    case 'set_fase':
+      return cmd.value ? row.phase.name === cmd.value : row.phase.active === false;
+    case 'set_durasi':
+      return row.phase.duration !== null && row.phase.duration === cmd.seconds;
+    case 'fase_reset':
+      return row.phase.elapsed !== null && row.phase.elapsed <= 5;
+    default:
+      return false;
   }
-  state.optimistic = { manual_mode: manual, status_sistem: status, until: Date.now() + 35000 };
-  state.lastData.manual_mode = manual;
-  state.lastData.status_sistem = status;
 }
 
-function flash(msg, ms = 4000) {
-  state.cmdStatus = msg;
-  setTimeout(() => { if (state.cmdStatus === msg) state.cmdStatus = ''; }, ms);
+// Perintah yang dikirim: apakah sudah dieksekusi, atau sudah lewat batas waktu?
+function checkPending() {
+  const p = state.pending;
+  if (!p) return;
+  if (cmdConfirmed(p, state.lastData)) {
+    state.cmdStatus = 'Perintah ' + cmdLabel(p) + ' dieksekusi perangkat.';
+    state.cmdError = '';
+    state.pending = null;
+    return;
+  }
+  if (Date.now() > p.deadline) {
+    // Jangan kirim ulang otomatis: aktuator bisa aktif lagi (risiko
+    // actuation berulang). Laporkan terus terang, jangan diam-diam revert.
+    state.cmdError = 'Perintah ' + cmdLabel(p) + ' BELUM dieksekusi — perangkat tidak merespons dalam ' +
+      Math.round(CMD_TIMEOUT_MS / 1000) + ' detik. Tidak dikirim ulang otomatis.';
+    state.cmdStatus = '';
+    state.pending = null;
+  }
 }
 
-export async function sendCommand(action, value) {
+export async function sendCommand(action, value, extra = {}) {
   // Tamu tidak punya UI kontrol, tapi tetap dijaga agar tidak bisa menulis.
   if (!auth || !auth.currentUser) {
-    flash("Kamu sedang masuk sebagai tamu — login untuk kontrol");
+    state.cmdStatus = 'Kamu sedang masuk sebagai tamu — login untuk kontrol';
     return;
   }
-  flash("Mengirim perintah...");
-  // Terapkan ke tampilan SEBELUM menunggu jaringan. Kalau teks menunggu
-  // balasan RTDB (ratusan ms), switch dan tulisan ON/OFF terlihat bertentangan.
-  applyLocalCommand(action, value);
+  if (!state.isAdmin) {
+    state.cmdStatus = 'Hanya admin yang boleh mengirim perintah';
+    return;
+  }
+  const body = { action: action, value: value };
+  if (extra.unit) body.unit = extra.unit;
+  state.cmdStatus = 'Mengirim perintah ' + cmdLabel({ action, value }) + '…';
+  state.cmdError = '';
   try {
     const token = await auth.currentUser.getIdToken();
-    const res = await fetch(`${DB_URL}/commands/${zoneId()}.json?auth=${token}`, {
-      method: "POST",
+    const res = await fetch(`${DB_URL}/commands/${zoneId()}/${cmdKey()}.json?auth=${token}`, {
+      method: 'PUT',
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: action, value: value })
+      body: JSON.stringify(body)
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    // Device mengeksekusi <=5 s lalu mengonfirmasi lewat push (<=20 s).
-    flash("Perintah " + action + " terkirim ke " + zoneId() + " (dieksekusi hingga 5 detik)");
+    state.pending = {
+      action, value,
+      seconds: extra.seconds ?? null,
+      sentAt: Date.now(),
+      deadline: Date.now() + CMD_TIMEOUT_MS,
+    };
+    state.cmdStatus = 'Perintah ' + cmdLabel({ action, value }) + ' terkirim — menunggu konfirmasi perangkat…';
   } catch (e) {
-    // Perintah gagal: kembalikan tampilan ke kondisi sebelum diklik.
-    applyLocalCommand(action, !value);
-    flash("Gagal kirim: " + e.message);
+    console.error('Gagal kirim perintah:', e.message);
+    state.cmdStatus = '';
+    state.cmdError = 'Gagal mengirim perintah: ' + e.message;
   }
 }
 
+// Sakelar aktuator: NYALA = paksa nyala, MATI = lepas override (kembali ke
+// fuzzy). Sakelar MATI bukan "paksa mati" — override manual di firmware
+// expires sendiri setelah 10 menit.
 export function onSwitch(action, on) {
-  if (action === "auto") {
-    if (!on) {
-      flash("Auto tidak bisa dimatikan langsung — geser aktuator manual untuk keluar dari auto");
-      return;
-    }
-    sendCommand('auto', true);
+  sendCommand(action, on);
+}
+
+// Tombol "Kembali ke Auto": semua aktuator kembali ke fuzzy (controlRelease).
+export function releaseAll() {
+  sendCommand('auto', true);
+}
+
+// ------------------------------------------------------------------ fase ---
+// Setelan fase & target VPD (lihat firmware/src/phase.cpp).
+export const VPD_TARGET_MIN = 0.3;
+export const VPD_TARGET_MAX = 2.5;
+
+export function setVpdTarget(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n < VPD_TARGET_MIN || n > VPD_TARGET_MAX) {
+    state.cmdError = 'Target VPD harus antara ' + VPD_TARGET_MIN + ' dan ' + VPD_TARGET_MAX + ' kPa';
     return;
   }
-  sendCommand(action, on);
+  sendCommand('set_vpd', n);
+}
+
+export function setPhaseName(name) {
+  sendCommand('set_fase', String(name || '').trim());
+}
+
+export function setPhaseDuration(value, unit) {
+  const n = Number(value);
+  if (!isFinite(n) || n < 0) {
+    state.cmdError = 'Durasi harus angka >= 0';
+    return;
+  }
+  const mult = { detik: 1, menit: 60, jam: 3600, hari: 86400 }[unit] || 1;
+  const sec = Math.round(n * mult);
+  if (sec > 31536000) {
+    state.cmdError = 'Durasi maksimum 1 tahun';
+    return;
+  }
+  sendCommand('set_durasi', n, { unit, seconds: sec });
+}
+
+export function resetPhaseCounter() {
+  sendCommand('fase_reset', true);
+}
+
+// --------------------------------------------------------------- ekspor ---
+// Ekspor CSV dari data yang SUDAH termuat di memori (klien, tanpa backend).
+// Tidak menghapus apa pun dari RTDB: rules tidak mengizinkan, dan itu memang
+// bukan urusan dashboard.
+const csvCell = v => {
+  const s = v === null || v === undefined ? '' : String(v);
+  return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+
+export function exportCsv() {
+  const rows = state.logData;
+  if (!rows.length) {
+    state.cmdStatus = 'Belum ada data untuk diekspor';
+    return;
+  }
+  const head = ['waktu', 'suhu_C', 'kelembapan_pct', 'tanah_pct', 'vpd_kPa', 'etc_mm_hari',
+    'tds_ppm', 'status', 'manual_mode', 'fase', 'vpd_target_kPa', 'fase_aktif',
+    'durasi_s', 'elapsed_s', 'sisa_s', 'device'];
+  const body = rows.map(r => [
+    r.ts ? new Date(r.ts * 1000).toISOString() : '',
+    r.temperature, r.humidity, r.soil, r.vpd, r.etc, r.tds,
+    r.status, r.manual ? 'YA' : 'TIDAK',
+    r.phase.name, r.phase.target, r.phase.active ? 'YA' : 'TIDAK',
+    r.phase.duration, r.phase.elapsed, r.phase.remaining, r.device,
+  ].map(csvCell).join(','));
+  // BOM supaya Excel membaca UTF-8 (nama fase/label bisa mengandung huruf
+  // beraksen) dengan benar.
+  const blob = new Blob(['﻿' + [head.join(',')].concat(body).join('\n')],
+    { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `smartgh_${zoneId()}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  state.cmdStatus = `${rows.length} baris diekspor ke CSV`;
 }
 
 // ---------------------------------------------------------------- login ---
 export function submitLogin(email, pass) {
   return auth.signInWithEmailAndPassword(email, pass)
     .then(() => { state.loginOpen = false; state.loginError = ''; })
-    .catch(e => { state.loginError = e.message; throw e; });
+    .catch(e => {
+      // Jangan bocorkan "user tidak ada" vs "password salah" — itu aiding
+      // user enumeration. Detail asli hanya di console.
+      console.warn('Login gagal:', e.code || e.message);
+      state.loginError = 'Email atau password salah.';
+      throw e;
+    });
 }
 
 export function signOut() {
@@ -301,7 +584,7 @@ export function signOut() {
 
 // ------------------------------------------------------- ganti nama unit ---
 // Memakai input inline, BUKAN prompt(): prompt() diblokir di beberapa konteks
-// (iframe, embedded browser) sehingga tombolnya jadi tampak tidak berrespons.
+// (iframe, embedded browser) sehingga tombolnya jadi tampak tidak mer-respons.
 // Enter = simpan, Esc atau klik ke luar = batal.
 export async function saveRename(i, val) {
   const id = ZONES[i].id;
@@ -343,13 +626,13 @@ export function switchZone(i) {
   if (i === state.currentZone) return;
   state.currentZone = i;
   state.lastData = null;
-  state.optimistic = null;
-  // Buang sisa data greenhouse sebelumnya supaya tabel/grafik tidak sempat
-  // menampilkan unit lama selagi data yang baru dimuat.
   state.logData = [];
   state.logFilter = '';
   state.online = false;
-  state.age = 0;
+  state.age = null;
+  state.pending = null;
+  state.cmdStatus = '';
+  state.cmdError = '';
   fetchDataLogs();
 }
 

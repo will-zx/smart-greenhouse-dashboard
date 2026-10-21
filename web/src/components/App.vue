@@ -7,6 +7,7 @@ import UserMenu from './UserMenu.vue';
 import LoginModal from './LoginModal.vue';
 import Metrics from './Metrics.vue';
 import Controls from './Controls.vue';
+import PhasePanel from './PhasePanel.vue';
 import TrendChart from './TrendChart.vue';
 import LogTable from './LogTable.vue';
 
@@ -97,6 +98,7 @@ const toggleView = () => { state.view = state.view === 'log' ? 'beranda' : 'log'
           <Metrics />
           <Controls />
         </div>
+        <PhasePanel />
         <TrendChart />
       </section>
 

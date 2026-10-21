@@ -78,7 +78,10 @@ watch(() => state.logData, sync);
 function sync() {
   if (!chart) return;
   // Sumbu X: jam saja — label penuh ("11/10/2026, 22.27.15") tidak muat.
+  // Record tanpa ts (jam perangkat belum sinkron) dapat label "?".
   chart.data.labels = state.logData.map(l => fmtClock(l.ts));
+  // Record tanpa nilai sensor (field dihapus firmware) -> null, bukan 0:
+  // Chart.js menggambar celah, jadi tidak ada titik 0 palsu di grafik.
   chart.data.datasets[0].data = state.logData.map(l => l.temperature);
   chart.data.datasets[1].data = state.logData.map(l => l.humidity);
   chart.update();
@@ -108,7 +111,10 @@ onUnmounted(() => chart?.destroy());
     <!-- Umur data di bawah grafik, bukan di header: pengguna bisa membedakan
          "sensor diam 40 detik" dari "dashboardnya yang macet". -->
     <p class="mt-3 min-h-4 text-xs text-muted">
-      {{ state.online && typeof state.age === 'number' ? `Data terakhir ${humanAge(state.age)} lalu` : '' }}
+      <template v-if="state.online">
+        <template v-if="state.age === null">Jam perangkat belum sinkron — record terakhir tidak punya field ts</template>
+        <template v-else>Data terakhir {{ humanAge(state.age) }} lalu</template>
+      </template>
     </p>
   </div>
 </template>

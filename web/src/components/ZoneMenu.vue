@@ -2,7 +2,9 @@
 import { ref, nextTick, computed } from 'vue';
 import { state, ZONES, switchZone, saveRename, zoneName, humanAge } from '../store.js';
 
-const statusText = computed(() => `Data terakhir masuk ${humanAge(state.age)} lalu`);
+const statusText = computed(() => state.age === null
+  ? 'Jam perangkat belum sinkron'
+  : `Data terakhir masuk ${humanAge(state.age)} lalu`);
 // dipakai di aria-label baris zona aktif
 
 // ZONES WAJIB di-import dari store. Bare `ZONES` di template selalu undefined:
@@ -68,7 +70,7 @@ async function finish(save) {
                    menyesatkan. Ini juga journeysscreen sentuh: Unlike `title`,
                    teks ini selalu terbaca tanpa hover. -->
               <span v-if="i === state.currentZone" class="shrink-0 text-[10.5px] font-normal text-muted">
-                {{ state.online ? `· ${humanAge(state.age)} lalu` : '· gagal baca' }}
+                {{ !state.online ? '· gagal baca' : (state.age === null ? '· jam belum sinkron' : '· ' + humanAge(state.age) + ' lalu') }}
               </span>
             </span>
             <span class="font-mono text-[10.5px] text-muted">{{ z.id }}</span>

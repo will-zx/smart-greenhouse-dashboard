@@ -17,6 +17,8 @@
   --color-ok: #388e3c;
   --color-danger: #e53935;
   --color-danger-soft: #fef2f2;
+  --color-warn: #b26a00;
+  --color-warn-soft: #fff8e1;
   --color-track: #bbdefb;
 
   /* Status koneksi unit di topbar (dari .zone-btn.is-ok/.is-stale/.is-off) */
@@ -49,5 +51,14 @@
   }
   .pill-on {
     @apply bg-accent-soft text-accent-dark;
+  }
+  /* Gangguan sensor (SOILERR/TDSERR) vs jam belum sinkron (NOSYNC).
+     Keduanya beda dari "gagal baca" (offline, merah di topbar) dan dari
+     "data lama" (kuning di topbar). */
+  .pill-err {
+    @apply ml-1 bg-danger-soft text-danger;
+  }
+  .pill-warn {
+    @apply ml-1 bg-warn-soft text-warn;
   }
 }

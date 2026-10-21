@@ -6,20 +6,31 @@ import { state, humanAge, zoneId } from '../store.js';
 // yang penting adalah kesegaran data, sedangkan nama unit sudah ada di judul
 // kartu dan di popup daftar. Warna: hijau = segar, kuning = basi < 1 hari,
 // merah = basi > 1 hari atau gagal membaca.
+//
+// Record tanpa field ts (jam perangkat belum sinkron) punya warna sendiri:
+// TIDAK boleh hijau (seolah-olah segar) dan tidak boleh "NaN menit" —
+// pork: perangkat hidup, tapi jamnya belum sinkron.
 const cls = computed(() => {
   if (!state.online) return 'bg-off text-white border-transparent';
+  if (state.age === null) return 'bg-stale text-[#1f1f00] border-transparent';
   if (state.age > 86400) return 'bg-off text-white border-transparent';
   if (state.age > 60) return 'bg-stale text-[#1f1f00] border-transparent';
   return 'bg-ok text-white border-transparent';
 });
 
-const label = computed(() => state.online ? humanAge(state.age) : 'gagal baca');
+const label = computed(() => {
+  if (!state.online) return 'gagal baca';
+  if (state.age === null) return 'jam belum sinkron';
+  return humanAge(state.age);
+});
 
 // Teks lengkap untuk hover (desktop) dan pembaca layar. Di layar sentuh `title`
 // tidak muncul — teks penuhnya tampil di ZoneMenu, di samping nama unit aktif.
-const ket = computed(() => state.online
-  ? `Data terakhir masuk ${humanAge(state.age)} lalu`
-  : 'Gagal membaca data greenhouse');
+const ket = computed(() => {
+  if (!state.online) return 'Gagal membaca data greenhouse';
+  if (state.age === null) return 'Jam perangkat belum sinkron — record terakhir tidak punya field ts';
+  return `Data terakhir masuk ${humanAge(state.age)} lalu`;
+});
 </script>
 
 <template>

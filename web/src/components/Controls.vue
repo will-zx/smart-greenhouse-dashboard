@@ -1,8 +1,9 @@
 <script setup>
 import { computed } from 'vue';
-import { state, actuators, onSwitch } from '../store.js';
+import { state, actuators, manualInfo, onSwitch, releaseAll } from '../store.js';
 
 const a = computed(() => actuators.value);
+const mi = computed(() => manualInfo.value);
 
 // Kartu Kontrol tetap terlihat untuk semua orang (=status aktuator berguna untuk
 // dipantau), tetapi sakelarnya disembunyikan bila belum login admin.
@@ -14,12 +15,29 @@ const a = computed(() => actuators.value);
 const BLADE = 'M12 12c-.4-2.6.4-4.8 2.6-5.9 1.9-.9 4-.2 4.8 1.6.8 1.9-.1 4-1.9 4.9-1.6.8-3.2.3-4.4-.6';
 const spin = d => [0, 120, 240].map(r => ({ d, t: `rotate(${r} 12 12)` }));
 
+// Sakelar = status OVERRIDE, bukan status aktuator.
+//   auto  -> sakelar mati, aktuator ikut fuzzy
+//   on    -> sakelar nyala, aktuator dipaksa nyala
+//   off   -> paksa mati (hanya mungkin di firmware lama)
+//   unknown -> ada override tapi perangkat tidak menyebut aktuator mana
+const OV_TEXT = {
+  auto: 'Auto (ikut fuzzy)',
+  on: 'Paksa nyala',
+  off: 'Paksa mati',
+  unknown: 'Override (tidak dilaporkan)',
+};
+
 const items = computed(() => [
-  { key: 'mist', label: 'Misting', on: a.value.mist, icon: [{ d: 'M4 15a7 7 0 1 1 11.7-7H17a4.5 4.5 0 0 1 2.5 8.2M8 16v1.5M12 16v2M16 16v1.5' }] },
-  { key: 'irigasi', label: 'Irigasi', on: a.value.irigasi, icon: [{ d: 'M7 3s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7zM17 10s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z' }] },
-  { key: 'blower', label: 'Blower', on: a.value.blower, icon: spin(BLADE), duty: a.value.level },
-  { key: 'auto', label: 'Auto', on: a.value.auto, icon: [{ d: 'M21 12a9 9 0 1 1-3-6.7M21 3v5h-5' }] },
+  { key: 'mist', label: 'Misting', on: a.value.mist, icon: [{ d: 'M4 15a7 7 0 1 1 11.7-7H17a4.5 4.5 0 0 1 2.5 8.2M8 16v1.5M12 16v2M16 16v1.5' }],
+    tip: 'Sakelar nyala = misting dipaksa nyala. Sakelar mati = override dilepas, kembali ke fuzzy.' },
+  { key: 'irigasi', label: 'Irigasi', on: a.value.irigasi, icon: [{ d: 'M7 3s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7zM17 10s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z' }],
+    tip: 'Sakelar nyala = irigasi dipaksa nyala untuk SATU siklus (FILL → FERT → DIST), lalu status kembali ke MATI.' },
+  { key: 'blower', label: 'Blower', on: a.value.blower, icon: spin(BLADE), duty: a.value.level,
+    tip: 'Sakelar nyala = blower dipaksa nyala (duty 100%). Sakelar mati = kembali ke fuzzy. Duty shown = keluaran fuzzy yang berjalan.' },
 ]);
+
+// Sakelar menyala kalau aktuator itu di-override "paksa nyala".
+const ovOf = k => a.value.override[k] || 'auto';
 </script>
 
 <template>
@@ -32,10 +50,31 @@ const items = computed(() => [
       <span class="text-xs text-muted">{{ state.isAdmin ? 'Kontrol remot via Firebase RTDB' : 'Hanya lihat — login untuk kontrol manual' }}</span>
     </div>
 
+    <!-- Indikator mode manual: aktuator mana yang sedang di-override.
+         Override manual kedaluwarsa sendiri setelah 10 menit, jadi tidak ada
+         tombol "kembali ke auto" yang wajib ditekan. -->
+    <div
+      v-if="mi.any"
+      class="mb-3 rounded-lg border border-accent bg-accent-soft px-3 py-2 text-[11.5px] leading-snug text-accent-dark"
+    >
+      <b>Mode manual aktif</b>
+      <span v-if="mi.items.length"> — {{ mi.items.map(i => i.name + ' (' + i.mode + ')').join(', ') }}</span>
+      <span v-else> — aktuator yang di-override tidak dilaporkan perangkat</span>
+      <span class="block text-muted">Override expires sendiri setelah 10 menit, lalu aktuator kembali ke fuzzy.</span>
+    </div>
+
     <div class="flex flex-col gap-2">
       <div v-for="it in items" :key="it.key" class="flex items-center gap-2.5 rounded-lg border border-border bg-card-2 px-3.5 py-2.5">
         <svg class="shrink-0 text-accent" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path v-for="(p, pi) in it.icon" :key="pi" :d="p.d" :transform="p.t" /></svg>
-        <h3 class="whitespace-nowrap text-[13.5px] font-semibold">{{ it.label }}</h3>
+        <div class="min-w-0">
+          <h3 class="whitespace-nowrap text-[13.5px] font-semibold">{{ it.label }}</h3>
+          <!-- Status aktuator (yang SEDANG berjalan) terpisah dari status
+               override — operator perlu tahu apa yang benar-benar jalan. -->
+          <span class="block text-[10.5px] text-muted">
+            {{ OV_TEXT[ovOf(it.key)] }}
+            <span class="opacity-70">· status {{ it.on ? 'MENYALA' : 'MATI' }}</span>
+          </span>
+        </div>
 
         <div class="ml-auto flex items-baseline gap-2.5">
           <!-- Duty blower = keluaran fuzzy (PWM), huruf kecil di bawah status. -->
@@ -46,29 +85,48 @@ const items = computed(() => [
                semua orang (status ON/OFF berguna dipantau), tapi tanpa login
                tidak boleh ada kontrol yang bisa diklik — sama seperti
                `body.read-only .switch { display:none }` di style.css lama.
-               Penolakan sesungguhnya tetap di RTDB rules + sendCommand(). -->
+               Penolakan sesungguhnya tetap di RTDB rules + sendCommand().
+
+               Sakelar menampilkan status OVERRIDE: nyala = "paksa nyala",
+               mati = "override dilepas, kembali ke fuzzy" (BUKAN "paksa mati"). -->
           <label
             v-if="state.isAdmin"
             class="switch relative inline-block h-[18px] w-[34px] shrink-0 cursor-pointer"
+            :title="it.tip"
           >
             <input
               type="checkbox" class="sr-only"
-              :checked="it.on"
+              :checked="ovOf(it.key) === 'on'"
               @change="onSwitch(it.key, $event.target.checked)"
             >
             <span
               class="absolute inset-0 rounded-full transition-colors duration-200"
-              :class="it.on ? 'bg-accent-dark' : 'bg-track'"
+              :class="ovOf(it.key) === 'on' ? 'bg-accent-dark' : 'bg-track'"
             />
             <span
               class="absolute left-0.5 top-0.5 h-[14px] w-[14px] rounded-full bg-white transition-transform duration-200"
-              :class="it.on && 'translate-x-[16px]'"
+              :class="ovOf(it.key) === 'on' && 'translate-x-[16px]'"
             />
           </label>
         </div>
       </div>
     </div>
 
-    <p class="mt-3 min-h-[14px] text-center text-[11px] font-semibold text-muted">{{ state.cmdStatus }}</p>
+    <!-- "Kembali ke Auto" SELALU ada (admin): override dilepas untuk semua
+         aktuator sekaligus. Sakelar per aktuator hanya melepas override
+         aktuator itu. -->
+    <button
+      v-if="state.isAdmin"
+      type="button"
+      class="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[12.5px] font-semibold text-ink hover:bg-card-2 disabled:opacity-50"
+      title="Lepas override manual semua aktuator — semua kembali ke fuzzy"
+      @click="releaseAll()"
+    >
+      <svg class="text-accent" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+      Kembali ke Auto
+    </button>
+
+    <p v-if="state.cmdStatus" class="mt-3 min-h-[14px] text-center text-[11px] font-semibold text-muted">{{ state.cmdStatus }}</p>
+    <p v-if="state.cmdError" class="mt-1 min-h-[14px] text-center text-[11px] font-semibold text-danger">{{ state.cmdError }}</p>
   </div>
 </template>
