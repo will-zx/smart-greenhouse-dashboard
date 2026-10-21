@@ -25,6 +25,10 @@
 %   (g) soil invalid -> tidak menyiram
 %   (h) manual override -> siklus boleh jalan
 %   (i) satu permintaan = satu siklus (tidak ada siklus ganda)
+%   (j) permintaan manual BARU menembus jeda minimum (perintah eksplisit)
+%   (k) override manual tetap menyala -> TIDAK ada siklus kedua (pompa tidak
+%       menyala terus-menerus)
+%   (l) override dilepas lalu dinyalakan lagi -> siklus baru boleh jalan
 
 function irrig_sim()
 
@@ -92,21 +96,43 @@ function st = roll_over_day(st)
   endif
 endfunction
 
-function st = irr_update(st, cfg, trigger, etcv)
+function st = irr_update(st, cfg, trigger, etcv, manual)
   st = roll_over_day(st);
+
+  % Permintaan manual BARU = sakelar operator baru dinyalakan (turun = dilepas).
+  manualNew = manual && !st.prevManual;
+  st.prevManual = manual;
+  if !manual
+    st.manualRequestUsed = false;
+  endif
 
   if trigger && st.phase == 0
     budget = daily_budget_ml(cfg, etcv);
     dose = dose_ml(cfg, etcv);
     dms = dose_ms(cfg, etcv);
 
+    budgetFull = (st.usedMl + dose > budget + 0.5);
+    intervalShort = st.hasCycle && (st.now - st.lastCycleStartMs) < min_interval_ms(cfg);
+    % Manual boleh menembus jeda & anggaran, tapi satu siklus per permintaan.
+    manualAllow = manual && manualNew && !st.manualRequestUsed;
+
     if dose <= 0 || dms <= 0
+      st.holdReason = 'ETc belum tersedia';
       st.log{end+1} = 'ETc belum tersedia, irigasi ditahan';
-    elseif st.usedMl + dose > budget + 0.5
+    elseif budgetFull && !manualAllow
+      st.holdReason = 'anggaran harian habis';
       st.log{end+1} = sprintf('anggaran harian habis: %.0f/%.0f mL', st.usedMl, budget);
-    elseif st.hasCycle && (st.now - st.lastCycleStartMs) < min_interval_ms(cfg)
+    elseif intervalShort && !manualAllow
+      st.holdReason = 'jeda minimum belum lewat';
       st.log{end+1} = 'jeda minimum belum lewat';
     else
+      if manualAllow && (budgetFull || intervalShort)
+        st.log{end+1} = 'override manual: siklus jalan di luar jeda/anggaran (niat operator)';
+      endif
+      if manualAllow
+        st.manualRequestUsed = true;
+      endif
+      st.holdReason = '';
       st = next_phase(st, 1);              % DIST
       st.cycleDoseMs = floor(dms);         % sama dengan konversi unsigned long di firmware
       st.cycleDoseMl = dose;
@@ -146,6 +172,9 @@ function st = init_state()
   st.cycleDoseMs = 0;
   st.cycleDoseMl = 0;
   st.pumpOn = false;
+  st.prevManual = false;        % nilai manual pada iterasi sebelumnya
+  st.manualRequestUsed = false;  % permintaan manual sudah dipakai untuk 1 siklus
+  st.holdReason = '';            % alasan permintaan ditahan (dikirim ke dashboard)
   st.log = {};
 endfunction
 
@@ -179,7 +208,7 @@ endfunction
 %% --- (a) ETc 8,68 -> siklus pertama, durasi 123 s -----------------------
 st = init_state();
 etcv = 8.68;
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);
 assert(st.phase == 1, '(a) siklus tidak dimulai');
 assert(near(dose_ml(cfg, etcv), 3906, 1), '(a) dosis bukan 3906 mL');
 assert(near(dose_ms(cfg, etcv) / 1000, 123.2, 0.2), '(a) durasi bukan 123,2 s');
@@ -190,7 +219,7 @@ printf('(a) ETc 8,68 -> dose 3906 mL, durasi 123 s, terpakai 3906 mL      OK\n')
 
 %% --- (b) permintaan kedua dalam 1 menit DITAHAN (siklus masih jalan) ----
 st.now += 60000;                                  % 1 menit kemudian
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);
 assert(st.phase == 1, '(b) siklus berhenti saat permintaan kedua datang');
 assert(count_prefix(st, 'irigasi: dose') == 1, '(b) ada siklus kedua saat siklus pertama jalan');
 assert(st.pumpOn, '(b) pompa DIST mati saat siklus berjalan');
@@ -198,18 +227,20 @@ printf('(b1) permintaan 1 menit kemudian: siklus lama jalan, tak ada siklus gand
 
 %% --- (b2) permintaan setelah siklus selesai, jeda minimum masih belum ----
 st.now += 180000;                                 % siklus (123 s) sudah selesai
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);   % menutup siklus
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);   % menutup siklus
 assert(st.phase == 0, '(b2) siklus belum selesai');
 st.now += cfg.STEP_MS;
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);   % permintaan baru
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);   % permintaan baru
 assert(st.phase == 0, '(b2) siklus jalan padahal jeda minimum belum lewat');
 assert(count_prefix(st, 'jeda minimum belum lewat') == 1, '(b2) log jeda minimum tidak ada');
+assert(strcmp(st.holdReason, 'jeda minimum belum lewat'), ...
+       '(b2) alasan tahan ke dashboard bukan "jeda minimum belum lewat"');
 assert(near(st.usedMl, 3906, 1), '(b2) volume terpakai berubah padahal siklus ditahan');
 printf('(b2) permintaan setelah siklus selesai DITAHAN jeda minimum 12 jam    OK\n');
 
 %% --- (c) setelah jeda minimum lewat, siklus kedua jalan -----------------
 st.now += min_interval_ms(cfg);                   % +12 jam dari siklus pertama
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);
 assert(st.phase == 1, '(c) siklus kedua tidak jalan setelah jeda minimum');
 assert(count_prefix(st, 'irigasi: dose') == 2, '(c) siklus kedua tidak tercatat');
 assert(near(st.usedMl, 7812, 2), '(c) volume terpakai bukan 7812 mL');
@@ -217,10 +248,12 @@ printf('(c) setelah jeda 12 jam, siklus kedua jalan (terpakai 7812 mL)    OK\n')
 
 %% --- (d) siklus ketiga DITAHAN oleh anggaran harian ---------------------
 st.now += 180000;                                 % siklus kedua selesai
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);
 st.now += cfg.STEP_MS;
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);   % permintaan ketiga
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);   % permintaan ketiga
 assert(count_prefix(st, 'anggaran harian habis') == 1, '(d) log anggaran habis tidak ada');
+assert(strcmp(st.holdReason, 'anggaran harian habis'), ...
+       '(d) alasan tahan ke dashboard bukan "anggaran harian habis"');
 assert(near(st.usedMl, 7812, 2), '(d) volume terpakai berubah padahal ditahan');
 printf('(d) siklus ketiga DITAHAN: anggaran harian 7812/7812 mL           OK\n');
 
@@ -230,7 +263,7 @@ assert(near(daily_budget_ml(cfg, etcv), 6318, 1), '(e) anggaran harian bukan 631
 assert(near(dose_ml(cfg, etcv), 3159, 1), '(e) dosis bukan 3159 mL');
 assert(near(dose_ms(cfg, etcv) / 1000, 99.7, 0.2), '(e) durasi bukan 99,7 s');
 st.now += min_interval_ms(cfg);
-st = irr_update(st, cfg, decide_trigger(true, true, false), etcv);
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);
 assert(st.phase == 1, '(e) siklus dengan ETc turun tidak jalan');
 assert(near(st.cycleDoseMl, 3159, 1), '(e) dosis siklus bukan 3159 mL');
 printf('(e) ETc 7,02 -> dose 3159 mL, durasi 99,7 s                       OK\n');
@@ -244,28 +277,69 @@ printf('(f) ETc 11,51 -> dose 5180 mL, durasi 163,4 s                     OK\n')
 
 %% --- (g) soil invalid -> tidak menyiram ---------------------------------
 st = init_state();
-st = irr_update(st, cfg, decide_trigger(false, true, false), etcv);
+st = irr_update(st, cfg, decide_trigger(false, true, false), etcv, false);
 assert(st.phase == 0, '(g) siklus jalan padahal soil invalid');
 assert(st.usedMl == 0, '(g) volume terpakai berubah padahal tidak menyiram');
 printf('(g) soil invalid -> tidak menyiram                               OK\n');
 
 %% --- (h) manual override -> siklus boleh jalan --------------------------
 st = init_state();
-st = irr_update(st, cfg, decide_trigger(false, true, true), etcv);
+st = irr_update(st, cfg, decide_trigger(false, true, true), etcv, true);
 assert(st.phase == 1, '(h) override manual tidak menjalankan siklus');
 assert(st.pumpOn, '(h) pompa DIST tidak hidup');
+assert(isempty(st.holdReason), '(h) alasan tahan tidak dikosongkan saat siklus jalan');
 printf('(h) override manual -> siklus jalan (pompa DIST hidup)             OK\n');
 
 %% --- (i) satu permintaan = satu siklus (tidak ada siklus ganda) ---------
 st = init_state();
 for k = 1:100                                     % 100 x 2 s = 200 s
   st.now += cfg.STEP_MS;
-  st = irr_update(st, cfg, decide_trigger(true, true, false), 8.68);
+  st = irr_update(st, cfg, decide_trigger(true, true, false), 8.68, false);
 endfor
 assert(count_prefix(st, 'irigasi: dose') == 1, ...
        '(i) permintaan tunggal menghasilkan %d siklus', count_prefix(st, 'irigasi: dose'));
 assert(st.phase == 0, '(i) pompa masih jalan setelah siklus selesai');
 printf('(i) permintaan terus TRUE: tepat 1 siklus (tidak ada siklus ganda)  OK\n');
+
+%% --- (j) permintaan manual BARU menembus jeda minimum --------------------
+% Sakelar operator dinyalakan = perintah eksplisit, jadi boleh jalan walau
+% jeda minimum 12 jam belum lewat.
+st = init_state();
+etcv = 8.68;
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);   % siklus otomatis
+assert(st.phase == 1, '(j) siklus otomatis pertama tidak jalan');
+st.now += 180000;                                                          % siklus selesai
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);   % menutup siklus
+assert(st.phase == 0, '(j) siklus belum selesai');
+st.now += cfg.STEP_MS;
+st = irr_update(st, cfg, decide_trigger(true, true, true), etcv, true);     % manual BARU
+assert(st.phase == 1, '(j) permintaan manual tidak menembus jeda minimum');
+assert(count_prefix(st, 'override manual') == 1, '(j) log override manual tidak ada');
+assert(count_prefix(st, 'irigasi: dose') == 2, '(j) siklus manual tidak tercatat');
+printf('(j) manual override baru -> menembus jeda minimum, siklus jalan    OK\n');
+
+%% --- (k) override manual TETAP menyala -> tidak ada siklus kedua ---------
+% Kalau manual boleh terus menusuk, pompa akan menyala terus-menerus.
+st.now += 180000;                                                          % siklus manual selesai
+st = irr_update(st, cfg, decide_trigger(true, true, true), etcv, true);     % menutup siklus
+assert(st.phase == 0, '(k) siklus belum selesai');
+for k = 1:60                                          % 60 x 2 s: manual tetap menyala
+  st.now += cfg.STEP_MS;
+  st = irr_update(st, cfg, decide_trigger(true, true, true), etcv, true);
+endfor
+assert(count_prefix(st, 'irigasi: dose') == 2, ...
+       '(k) override manual menghasilkan %d siklus (pompa menyala terus-menerus)', ...
+       count_prefix(st, 'irigasi: dose'));
+assert(st.phase == 0, '(k) pompa menyala terus-menerus');
+printf('(k) override manual tetap menyala: tepat 1 siklus manual          OK\n');
+
+%% --- (l) override dilepas lalu dinyalakan lagi -> siklus baru boleh ------
+st = irr_update(st, cfg, decide_trigger(true, true, false), etcv, false);   % manual dilepas
+st.now += cfg.STEP_MS;
+st = irr_update(st, cfg, decide_trigger(true, true, true), etcv, true);     % manual nyala lagi
+assert(st.phase == 1, '(l) permintaan manual baru tidak menjalankan siklus');
+assert(count_prefix(st, 'irigasi: dose') == 3, '(l) siklus manual baru tidak tercatat');
+printf('(l) manual dilepas lalu dinyalakan lagi -> siklus baru jalan      OK\n');
 
 printf('\nSEMUA SKENARIO STATE MACHINE IRIGASI LOLOS\n');
 endfunction

@@ -24,6 +24,23 @@ static bool          usedDayInit = false;
 static char          lastRejectKey[16] = "";
 static unsigned long lastRejectMs = 0;
 
+// Alasan permintaan terakhir ditahan, dikirim ke dashboard supaya operator
+// tahu kenapa air tidak keluar (bukan cuma "tidak merespons"). Kosong = tidak
+// ditahan.
+static char          holdReason[40] = "";
+
+static void setHoldReason(const char* r) {
+    strncpy(holdReason, r, sizeof(holdReason) - 1);
+    holdReason[sizeof(holdReason) - 1] = '\0';
+}
+
+// Permintaan manual: sakelar operator dinyalakan (turun = override dilepas).
+// prevManual dipakai untuk mengenali permintaan BARU; manualRequestUsed
+// memastikan satu permintaan manual hanya menghasilkan satu siklus, supaya
+// pompa tidak menyala terus-menerus selama override menyala.
+static bool          prevManual = false;
+static bool          manualRequestUsed = false;
+
 // ==== Tmean: rata-rata suhu sliding (ember 1 menit x 180 ember = 3 jam) ====
 // FAO-56 menetapkan Penman-Monteith sebagai metode ETo standar; Blaney-
 // Criddle (FAO-24) dikalibrasi untuk periode panjang. Rata-rata 3 jam ini
@@ -126,6 +143,7 @@ IrrigStatus irrigationStatus() {
     st.minIntervalMs = irrigationMinIntervalMs();
     st.doseMs = (phase == IRRIG_DIST) ? cycleDoseMs : irrigationDoseMs();
     st.doseMl = (phase == IRRIG_DIST) ? cycleDoseMl : irrigationDoseMl();
+    st.holdReason = holdReason;
     return st;
 }
 
@@ -158,35 +176,55 @@ void irrigationAbort() {
     phase = IRRIG_IDLE;
 }
 
-void irrigationUpdate(bool trigger) {
+void irrigationUpdate(bool trigger, bool manual) {
     unsigned long now = millis();
     budgetRollOver();
+
+    // Permintaan manual BARU = sakelar operator baru dinyalakan. Override
+    // yang dilepas (manual false) membuka permintaan manual berikutnya.
+    bool manualNew = manual && !prevManual;
+    prevManual = manual;
+    if (!manual) manualRequestUsed = false;
 
     // Syarat memulai siklus: trigger true DAN jeda minimum sudah lewat DAN
     // (terkumpul + dosis <= anggaran harian).
     // Permintaan yang ditahan (jeda/budget) DICoba ulang otomatis selama
     // trigger tetap true -> tidak ada "irigasi mati permanen" seperti dulu.
-    // Override manual operator juga tunduk pada jeda & anggaran (anti over-air).
+    // Override manual operator boleh menembus jeda & anggaran (perintah
+    // eksplisit), tapi hanya SATU siklus per permintaan manual.
     if (trigger && phase == IRRIG_IDLE) {
         float   budget = irrigationDailyBudgetMl();
         float   dose = irrigationDoseMl();
         unsigned long doseMs = irrigationDoseMs();
         char msg[120];
 
+        bool budgetFull    = (usedMl + dose > budget + 0.5f);
+        bool intervalShort = hasCycle && (now - lastCycleStartMs) < irrigationMinIntervalMs();
+        bool manualAllow   = manual && manualNew && !manualRequestUsed;
+
         if (dose <= 0.0f || doseMs == 0UL) {
+            setHoldReason("ETc belum tersedia");
             snprintf(msg, sizeof(msg),
                      "[irigasi] ETc belum tersedia, irigasi ditahan");
             logReject("etc", msg);
-        } else if (usedMl + dose > budget + 0.5f) {
+        } else if (budgetFull && !manualAllow) {
+            setHoldReason("anggaran harian habis");
             snprintf(msg, sizeof(msg),
                      "[irigasi] anggaran harian habis: %.0f/%.0f mL", usedMl, budget);
             logReject("budget", msg);
-        } else if (hasCycle && (now - lastCycleStartMs) < irrigationMinIntervalMs()) {
+        } else if (intervalShort && !manualAllow) {
+            setHoldReason("jeda minimum belum lewat");
             unsigned long sisa = irrigationMinIntervalMs() - (now - lastCycleStartMs);
             snprintf(msg, sizeof(msg),
                      "[irigasi] jeda minimum belum lewat: sisa %.0f menit", sisa / 60000.0f);
             logReject("jeda", msg);
         } else {
+            if (manualAllow && (budgetFull || intervalShort)) {
+                Serial.println("[irigasi] override manual: siklus jalan di luar "
+                               "jeda/anggaran (niat operator)");
+            }
+            if (manualAllow) manualRequestUsed = true;
+            setHoldReason("");
             phase = IRRIG_DIST;
             phaseStart = now;
             cycleDoseMs = doseMs;

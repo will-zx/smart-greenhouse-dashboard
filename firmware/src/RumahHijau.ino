@@ -287,7 +287,10 @@ static void controlTask(void* arg) {
         if (!sensorData.valid) {
             irrigationAbort();
         } else {
-            irrigationUpdate(irigasi);
+            // manual = override operator memaksa irigasi nyala (ov.irig == 1).
+            // Perintah eksplisit itu boleh menembus jeda & anggaran harian,
+            // tapi hanya satu siklus per permintaan manual.
+            irrigationUpdate(irigasi, ov.irig == 1);
         }
         bool irigasiRunning = irrigationRunning();
         IrrigStatus irig = irrigationStatus();

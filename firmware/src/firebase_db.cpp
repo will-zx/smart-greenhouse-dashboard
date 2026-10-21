@@ -46,6 +46,7 @@ static HTTPClient http;
 //   irigasi_anggaran_ml mL     anggaran harian (ETc x luas area x 0,1)
 //   irigasi_terpakai_ml mL     volume yang sudah dialirkan hari ini
 //   irigasi_jeda_menit  menit  jeda minimum antar siklus
+//   irigasi_alasan_tahan string alasan permintaan ditahan ("" = tidak ditahan)
 //   time_synced       bool    jam perangkat sudah sinkron NTP
 //   ts                s       epoch waktu pengiriman (hanya bila sinkron)
 //   device            string  id unit
@@ -234,6 +235,10 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     putNum(doc, "irigasi_anggaran_ml", irig.budgetMl);
     putNum(doc, "irigasi_terpakai_ml", irig.usedMl);
     putNum(doc, "irigasi_jeda_menit", (float)(irig.minIntervalMs / 60000UL));
+    // Alasan permintaan irigasi ditahan (jeda / anggaran / ETc belum ada).
+    // String kosong = tidak ada yang ditahan. Dashboard menampilkannya
+    // supaya operator tahu kenapa air tidak keluar.
+    doc["irigasi_alasan_tahan"] = irig.holdReason ? irig.holdReason : "";
     doc["time_synced"] = timeOk;
     if (timeOk) doc["ts"] = ts;
     doc["device"] = DEVICE_ID;
