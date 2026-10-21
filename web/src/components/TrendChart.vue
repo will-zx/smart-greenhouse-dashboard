@@ -91,7 +91,11 @@ onUnmounted(() => chart?.destroy());
 </script>
 
 <template>
-  <div class="mt-5 rounded-xl border border-border bg-card p-5 max-[420px]:p-4">
+  <!-- Tanpa mt-5: jarak antar kartu sudah gegeben oleh gap-5 di section
+       App.vue. mt-5 pernah ada saat grafik menempel langsung di baris metrik;
+       setelah Panel Fase disisipkan, margin itu menumpuk dan jadi jarak
+       dobel hanya di kartu ini. -->
+  <div class="rounded-xl border border-border bg-card p-5 max-[420px]:p-4">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="flex items-center gap-[7px] text-[15px] font-semibold">
         <svg class="shrink-0 text-accent" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 14l4-4 4 4 5-6"/></svg>
