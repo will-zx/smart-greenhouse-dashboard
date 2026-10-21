@@ -17,10 +17,11 @@ struct PhaseState {
 };
 
 void  phaseInit();                    // muat setelan dari NVS — panggil di setup()
-void  phaseSetVpd(float vpd);         // set VPD target (kPa) -> fase aktif
+bool  phaseSetVpd(float vpd);         // set VPD target (kPa) -> fase aktif; false bila di luar rentang
 void  phaseSetName(const char* name); // set nama fase
 void  phaseSetDuration(uint32_t seconds); // set durasi fase; reset penghitung
 void  phaseReset();                   // mulai ulang penghitung durasi dari nol
+void  phaseDeactivate();              // matikan mode setpoint/fase (kembali penuh ke fuzzy)
 bool  phaseActive();                  // ada VPD target aktif?
 float phaseVpdTarget();               // VPD target saat ini (kPa)
 PhaseState phaseGet();                // snapshot lengkap (untuk telemetri/DB)

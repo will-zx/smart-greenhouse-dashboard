@@ -8,7 +8,8 @@ struct SensorData {
     float temperature;
     float humidity;
     float soilMoisture;
-    bool valid;
+    bool  valid;        // SHT31 (mikroklimat) terbaca & masuk rentang
+    bool  soilValid;    // probe tanah dalam rentang raw yang masuk akal
 };
 
 void initSensor();

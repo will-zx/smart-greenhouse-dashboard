@@ -32,12 +32,21 @@ void phaseInit() {
     s_startUs = esp_timer_get_time();
 }
 
-void phaseSetVpd(float vpd) {
-    if (vpd < 0.0f || vpd > 10.0f) return;   // sanity: VPD wajar 0-10 kPa
+bool phaseSetVpd(float vpd) {
+    // Hanya rentang VPD yang wajar untuk hortikultura yang diterima; target
+    // 10 kPa membuat sistem tidak pernah misting sama sekali.
+    if (isnan(vpd) || vpd < VPD_TARGET_MIN || vpd > VPD_TARGET_MAX) return false;
     s_vpdTarget = vpd;
     s_active = true;
     prefs.putFloat("ph_vpd", vpd);
     prefs.putBool("ph_active", true);
+    return true;
+}
+
+void phaseDeactivate() {
+    // Mode setpoint/fase dimatikan -> keputusan sepenuhnya kembali ke fuzzy.
+    s_active = false;
+    prefs.putBool("ph_active", false);
 }
 
 void phaseSetName(const char* name) {
@@ -48,6 +57,7 @@ void phaseSetName(const char* name) {
 }
 
 void phaseSetDuration(uint32_t seconds) {
+    if (seconds > PHASE_MAX_DURATION_SEC) return;   // diamankan di sini juga
     s_durationSec = seconds;
     s_startUs = esp_timer_get_time();   // mulai hitung dari sekarang
     prefs.putULong("ph_dur", seconds);

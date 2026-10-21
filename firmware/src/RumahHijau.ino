@@ -32,9 +32,9 @@ static const int NET_TASK_CORE = 0;
 // Satu struct kecil di bawah mutex: kontrol menulis, jaringan membaca.
 struct Snapshot {
     float temperature, humidity, soilMoisture, vpd, etc, tds;
-    bool  valid, manual, mist, blower, irigasiRunning;
+    bool  manual, mist, blower, irigasiRunning;
     float blowerLevel;  // 0..1, tingkat blower yang benar-benar dijalankan (PWM)
-    char  status[40];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
+    char  status[64];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
     PhaseState phase;   // setelan fase + VPD target (untuk telemetri DB)
 };
 
@@ -64,6 +64,13 @@ static Snapshot snapshotRead() {
     return s;
 }
 
+// Tambahkan sufiks status (mis. " SOILERR") tanpa overflow.
+static void statusAdd(char* buf, size_t n, const char* suffix) {
+    size_t len = strlen(buf);
+    size_t add = strlen(suffix);
+    if (len + add + 1 < n) strcat(buf, suffix);
+}
+
 // ==== WiFi ====
 static unsigned long lastReconnect = 0;
 
@@ -91,8 +98,10 @@ void connectWiFi() {
 }
 
 void syncTime() {
-    // WIB (UTC+7). ts di sensor_logs jadi epoch asli agar waktu dashboard akurat.
-    configTime(7 * 3600, 0, "pool.ntp.org");
+    // WIB (UTC+7). Tiga server NTP: kalau satu tidak terjangkau, client
+    // otomatis pindah ke server berikutnya (NTP = titik kegagalan tunggal).
+    // ts di sensor_logs jadi epoch asli agar waktu dashboard akurat.
+    configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
 }
 
 // ==== Task kontrol (core 1, prio 3) ====
@@ -109,13 +118,15 @@ static void controlTask(void* arg) {
     TickType_t lastWake = xTaskGetTickCount();
     IrrigPhase prevIrrigPhase = IRRIG_IDLE;
 
-    // Fail-safe I2C nyangkut: subscribe controlTask ke Task WDT. Core arduino-esp32
-    // sudah menyalakan CONFIG_ESP_TASK_WDT + PANIC (timeout 5 s), jadi cukup daftar.
+    // Fail-safe I2C nyangkut: subscribe controlTask ke Task WDT. WDT di-init
+    // eksplisit di setup() (framework arduino-esp32 2.0.17 / ESP-IDF 4.4 TIDAK
+    // memanggil esp_task_wdt_init() sendiri -> subscribe tanpa init = gagal
+    // diam-diam dan fail-safe ini mati).
     // readTemperature()/readHumidity() blocking tanpa timeout I2C -> task spin > 5 s ->
     // panic -> reboot -> initActuators() mematikan pompa yang masih nyala.
     // Hanya controlTask: netTask sengaja blocking (join WiFi s/d 15 s, TLS) dan
     // akan memicu reset palsu. Return dicek — fail-safe yang diam-diam gagal
-    //subscribe sama dengan tidak ada (lihat juga xTaskCreatePinnedToCore di setup).
+    // subscribe sama dengan tidak ada.
     if (esp_task_wdt_add(nullptr) != ESP_OK) {
         Serial.println("[wdt] GAGAL subscribe controlTask - fail-safe I2C tidak aktif");
     }
@@ -131,7 +142,19 @@ static void controlTask(void* arg) {
             sensorData.temperature = emaUpdate(tempFilter, sensorData.temperature);
             sensorData.humidity    = emaUpdate(humFilter, sensorData.humidity);
         }
-        sensorData.soilMoisture = emaUpdate(soilFilter, sensorData.soilMoisture);
+        // Soil: HANYA nilai valid yang masuk filter. Probe dicabut -> raw
+        // mengambang -> 0 %/100 % palsu yang akan meracuni filter dan membuat
+        // irigasi nyala/mati diam-diam. Kalau tidak valid, pakai nilai sah
+        // terakhir (soilFilter.value) supaya keputusan tidak berubah liar.
+        if (sensorData.soilValid) {
+            sensorData.soilMoisture = emaUpdate(soilFilter, sensorData.soilMoisture);
+        } else if (soilFilter.seeded) {
+            sensorData.soilMoisture = soilFilter.value;   // nilai sah terakhir
+        } else {
+            // Belum pernah ada sampel sah: pakai kondisi NETRAL (50 %), bukan
+            // 0 % kering palsu (bikin fuzzy tambah misting tanpa alasan).
+            sensorData.soilMoisture = 50.0f;
+        }
 
         // TDS juga difilter, karena inilah kanal paling bising: pompa fert
         // berdenyut 2 s on / 1 s off sementara loop baca tiap 2 s, jadi dua
@@ -147,7 +170,11 @@ static void controlTask(void* arg) {
         IrrigPhase irrigPhase = irrigationPhase();
         if (irrigPhase == IRRIG_FERT && prevIrrigPhase != IRRIG_FERT) emaReset(tdsFilter);
         prevIrrigPhase = irrigPhase;
-        tdsPpm = emaUpdate(tdsFilter, readTDS(sensorData.temperature));
+        // TDS: hanya nilai sah yang masuk filter (probe dicabut -> jangan
+        // meracuni filter dengan angka garbage).
+        bool tdsValid = false;
+        float tdsSample = readTDS(sensorData.temperature, &tdsValid);
+        if (tdsValid) tdsPpm = emaUpdate(tdsFilter, tdsSample);
 
         if (sensorData.valid) {
             vpdValue = calcVpd(sensorData.temperature, sensorData.humidity);
@@ -166,12 +193,23 @@ static void controlTask(void* arg) {
             // Status eksplisit supaya operator/dashboard tahu regulate sudah berhenti
             // (bukan "Normal" basi dari iterasi valid terakhir).
             systemStatus = "Sensor Error";
-            if (millis() - lastFailPrint > 5000) {
-                lastFailPrint = millis();
-                Serial.println("[!] Sensor SHT31/Soil tidak terhubung - cek wiring");
-                Serial.printf("[!] Sensor error: %s (T:%.1f H:%.1f)\n",
-                              getSensorError(), sensorData.temperature, sensorData.humidity);
-                Serial.printf("[!] Soil raw: %d\n", (int)soilRaw);
+        }
+
+        // Log kegagalan sensor (dibatasi 1x per 5 s). Kegagalan harus terlihat
+        // di port Serial, bukan hanya diam di RTDB.
+        if ((!sensorData.valid || !sensorData.soilValid || !tdsValid) &&
+            millis() - lastFailPrint > 5000) {
+            lastFailPrint = millis();
+            if (!sensorData.valid) {
+                Serial.println("[!] Sensor SHT31 tidak terhubung - cek wiring");
+                Serial.printf("[!] Sensor error: %s\n", getSensorError());
+            }
+            if (!sensorData.soilValid) {
+                Serial.printf("[!] Probe tanah di luar rentang (raw %.0f) - irigasi ditahan\n",
+                              soilRaw);
+            }
+            if (!tdsValid) {
+                Serial.println("[!] TDS tidak terbaca sah - dosis pupuk dilewati");
             }
         }
 
@@ -181,48 +219,62 @@ static void controlTask(void* arg) {
         // nilai fuzzy terakhir dibekukan selamanya, mis. SHT31 dicabut di tengah
         // siklus -> misting/irigasi tetap nyala tanpa batas.
         bool mist = sensorData.valid && fuzzyOut.mistOn;
-        bool irigasi = sensorData.valid && fuzzyOut.irigasiOn;   // fuzzy; manual via controlApply
+        // Soil tidak valid -> keputusan irigasi fuzzy TIDAK dipakai (fail-safe:
+        // jangan siram/jangan mati diam-diam dari angka sensor rusak).
+        bool irigasi = sensorData.valid && sensorData.soilValid && fuzzyOut.irigasiOn;
         bool blower = sensorData.valid && fuzzyOut.blowerOn;
         float blowerLevel = sensorData.valid ? fuzzyOut.blowerLevel : 0.0f;
 
-        // Override VPD setpoint fase (bila admin sudah men-set target dari dashboard):
-        // VPD > target+BAND -> MISTING; VPD < target-BAND -> BLOWER; dalam band -> OFF.
-        // Diterapkan SEBELUM controlApply supaya manual tetap menang.
+        // Setpoint VPD fase = KOREKSI terhadap keluaran fuzzy, bukan pengganti.
+        // Fuzzy tetap menentukan apa yang dijalankan; setpoint hanya mendorong
+        // satu arah supaya tidak ada kondisi "status Kritis tapi tidak ada aksi".
+        //   VPD > target+band -> kebijakan MISTING: misting dinyalakan/diperahankan,
+        //                       blower yang diminta fuzzy TIDAK dimatikan.
+        //   VPD < target-band -> dorong blower PROPORSIONAL (bukan duty 100 %
+        //                       mendadak seperti sebelumnya); misting yang diminta
+        //                       fuzzy TIDAK dimatikan.
+        //   dalam band        -> fuzzy menentukan sepenuhnya, tanpa override.
         if (sensorData.valid && phaseActive()) {
             float target = phaseVpdTarget();
             if (vpdValue > target + VPD_BAND_KPA) {
-                mist = true;  blower = false; blowerLevel = 0.0;
+                mist = true;
             } else if (vpdValue < target - VPD_BAND_KPA) {
-                mist = false; blower = true;  blowerLevel = 1.0;
-            } else {
-                mist = false; blower = false; blowerLevel = 0.0;
+                float deficit = (target - VPD_BAND_KPA) - vpdValue;   // kPa di bawah band
+                float boost = constrain(deficit / VPD_BAND_KPA, 0.0f, 1.0f) * VPD_BOOST_MAX;
+                blower = true;
+                if (boost > blowerLevel) blowerLevel = boost;
             }
         }
 
-        if (sensorData.valid) controlApply(&mist, &irigasi, &blower);
+        // Override manual (tris-tata per aktuator) — manual tetap menang.
+        if (sensorData.valid) controlApply(&mist, &irigasi, &blower, &blowerLevel);
         bool manual = controlIsManual();
-        // Manual = 100%; auto = level fuzzy/VPD (presisi VPD via PWM).
-        float bl = manual ? (blower ? 1.0 : 0.0) : blowerLevel;
-        setActuators(mist, blower, bl);
+        setActuators(mist, blower, blowerLevel);
 
-        // Irigasi 4-pompa: sensor mati ATAU manual OFF = batalkan siklus; selain itu
-        // serah ke fuzzy (edge-trigger di irrigationUpdate — cycle sekali per permintaan).
-        if (!sensorData.valid || (manual && !irigasi)) {
+        // Irigasi 4-pompa: sensor mati = batalkan siklus; selain itu serah ke
+        // fuzzy (edge-trigger di irrigationUpdate — cycle sekali per permintaan).
+        // Sakelar manual yang dimatikan TIDAK lagi membatalkan siklus: override
+        // manual per aktuator, jadi mematikan sakelar berarti kembali ke fuzzy.
+        if (!sensorData.valid) {
             irrigationAbort();
         } else {
-            irrigationUpdate(irigasi, tdsPpm);
+            irrigationUpdate(irigasi, tdsPpm, tdsValid);
         }
         bool irigasiRunning = irrigationRunning();
 
-        if (sensorData.valid) {
-            Serial.printf("T:%.1fC H:%.1f%% Soil:%.1f%% VPD:%.2fkPa ETc:%.1fmm TDS:%.0fppm [%s]",
-                          sensorData.temperature, sensorData.humidity,
-                          sensorData.soilMoisture, vpdValue, etcValue, tdsPpm, systemStatus);
-            Serial.printf(" Mist:%s Irig:%s Blower:%s(lv%.0f%%) Fase:%s VPDtgt:%.2f\n",
-                          mist ? "ON" : "OFF", irigasiRunning ? "RUN" : "OFF",
-                          blower ? "ON" : "OFF", bl * 100.0,
-                          phaseGet().name, phaseVpdTarget());
+        // Serial: SELALU cetak (walau sensor invalid) supaya kegagalan terlihat
+        // di log port, bukan hanya diam di RTDB.
+        Serial.printf("T:%.1fC H:%.1f%% Soil:%.1f%%%s VPD:%.2fkPa ETc:%.1fmm TDS:%.0fppm%s [%s]",
+                      sensorData.valid ? sensorData.temperature : 0.0f,
+                      sensorData.valid ? sensorData.humidity : 0.0f,
+                      sensorData.soilMoisture, sensorData.soilValid ? "" : "!",
+                      vpdValue, etcValue, tdsPpm, tdsValid ? "" : "!", systemStatus);
+        Serial.printf(" Mist:%s Irig:%s Blower:%s(lv%.0f%%) Fase:%s VPDtgt:%.2f\n",
+                      mist ? "ON" : "OFF", irigasiRunning ? "RUN" : "OFF",
+                      blower ? "ON" : "OFF", blowerLevel * 100.0,
+                      phaseGet().name, phaseVpdTarget());
 
+        if (sensorData.valid) {
             // Backup lokal: seluruh pembacaan valid dicatat ke MicroSD.
             time_t ts = time(nullptr);
             if (ts >= 100000) {
@@ -238,7 +290,8 @@ static void controlTask(void* arg) {
         unsigned long now = millis();
         if (now - lastLcd >= LCD_INTERVAL) {
             lastLcd = now;
-            updateLcd(sensorData.temperature, sensorData.humidity,
+            updateLcd(sensorData.valid ? sensorData.temperature : 0.0f,
+                      sensorData.valid ? sensorData.humidity : 0.0f,
                       sensorData.soilMoisture, vpdValue, etcValue, tdsPpm, systemStatus);
         }
 
@@ -251,16 +304,21 @@ static void controlTask(void* arg) {
         s.vpd = vpdValue;
         s.etc = etcValue;
         s.tds = tdsPpm;
-        s.valid = sensorData.valid;
         s.manual = manual;
         s.mist = mist;
         s.blower = blower;
         s.irigasiRunning = irigasiRunning;
-        s.blowerLevel = bl;   // keluaran fuzzy yang jadi perintah PWM
+        s.blowerLevel = blowerLevel;   // keluaran fuzzy yang jadi perintah PWM
+        // status_sistem = status fuzzy + penanda aktuator hidup + penanda
+        // kegagalan sensor/jam. Dashboard membaca string ini (pill + tabel),
+        // jadi penanda kegagalan harus ikut di sini.
         snprintf(s.status, sizeof(s.status), "%s", systemStatus);
-        if (mist) strncat(s.status, " MISTING", sizeof(s.status) - strlen(s.status) - 1);
-        if (blower) strncat(s.status, " BLOWER", sizeof(s.status) - strlen(s.status) - 1);
-        if (irigasiRunning) strncat(s.status, " IRIGASI", sizeof(s.status) - strlen(s.status) - 1);
+        if (mist) statusAdd(s.status, sizeof(s.status), " MISTING");
+        if (blower) statusAdd(s.status, sizeof(s.status), " BLOWER");
+        if (irigasiRunning) statusAdd(s.status, sizeof(s.status), " IRIGASI");
+        if (!sensorData.soilValid) statusAdd(s.status, sizeof(s.status), " SOILERR");
+        if (!tdsValid) statusAdd(s.status, sizeof(s.status), " TDSERR");
+        if (time(nullptr) < 100000) statusAdd(s.status, sizeof(s.status), " NOSYNC");
         s.phase = phaseGet();
         snapshotPublish(s);
 
@@ -299,7 +357,11 @@ static void netTask(void* arg) {
                 lastCmd = now;
                 pollCommands();
             }
-            if (s.valid && now - lastPush >= DB_PUSH_MS) {
+            // Push telemetry SELALU (bukan hanya saat sensor valid): status
+            // "Sensor Error" yang sudah disiapkan harus sampai ke RTDB, kalau
+            // tidak dashboard tidak bisa membedakan "sensor mati" dari
+            // "device mati".
+            if (now - lastPush >= DB_PUSH_MS) {
                 lastPush = now;
                 String body;
                 bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
@@ -329,6 +391,20 @@ void setup() {
     initActuators();
     controlInit();
     controlRelease();
+
+    // Task WDT: framework arduino-esp32 2.0.17 (ESP-IDF 4.4) TIDAK pernah
+    // memanggil esp_task_wdt_init() sendiri (CONFIG_ESP_TASK_WDT_INIT tidak
+    // ada di sdkconfig), jadi subscribe controlTask DI GAGAL diam-diam
+    // (ESP_ERR_INVALID_STATE) dan jaring pengaman I2C nyangkut TIDAK aktif
+    // (device beku, aktuator tetap nyala). Inisialisasi eksplisit di sini
+    // (timeout 5 s, panic -> reboot; initActuators() mematikan pompa).
+    esp_err_t wdtErr = esp_task_wdt_init(WDT_TIMEOUT_S, true);
+    if (wdtErr == ESP_OK) {
+        Serial.printf("[wdt] Task WDT aktif (timeout %d s, panic)\n", WDT_TIMEOUT_S);
+    } else {
+        Serial.printf("[wdt] GAGAL init Task WDT: %s\n", esp_err_to_name(wdtErr));
+    }
+
     initLcd();
     initSdLogger();
     initSensor();

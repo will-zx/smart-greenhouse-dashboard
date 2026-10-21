@@ -20,8 +20,26 @@ SensorData readSensors(float soilRaw) {
     SensorData data;
     data.temperature = sht31.readTemperature();
     data.humidity = sht31.readHumidity();
-    data.soilMoisture = constrain(soilRaw, SOIL_WET, SOIL_DRY);
-    data.soilMoisture = map((int)data.soilMoisture, SOIL_DRY, SOIL_WET, 0, 100);
+
+    // Validasi probe tanah. Probe dicabut -> ADC mengambang (0 atau 4095),
+    // yang dipetakan jadi "100 % basah" (irigasi mati diam-diam) atau
+    // "0 % kering" (irigasi terus jalan). Jadi raw di luar rentang kalibrasi
+    // -> soilValid = false dan TIDAK boleh dipakai untuk keputusan irigasi.
+    // ponytail: SOIL_DRY/SOIL_WET masih ASUMSI (belum diukur pada probe asli)
+    // -> rentang valid ikut bergeser; ukur titik kering/basah lalu perbarui.
+    float lo = (float)SOIL_WET - (float)SOIL_RAW_TOL;
+    float hi = (float)SOIL_DRY + (float)SOIL_RAW_TOL;
+    data.soilValid = !isnan(soilRaw) && soilRaw >= lo && soilRaw <= hi;
+
+    if (data.soilValid) {
+        data.soilMoisture = constrain(soilRaw, SOIL_WET, SOIL_DRY);
+        data.soilMoisture = map((int)data.soilMoisture, SOIL_DRY, SOIL_WET, 0, 100);
+    } else {
+        // Nilai carry-over (bukan 0/100 palsu): pemanggil memakai nilai
+        // terakhir yang sah dan menahan irigasi.
+        data.soilMoisture = 0.0f;
+    }
+
     data.valid = shtOk && !isnan(data.temperature) && !isnan(data.humidity) &&
                  data.temperature > -20.0 && data.temperature < 60.0 &&
                  data.humidity >= 0.0 && data.humidity <= 100.0;

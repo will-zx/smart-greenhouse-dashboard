@@ -38,7 +38,7 @@ void irrigationAbort() {
     nextPhase(IRRIG_IDLE);
 }
 
-void irrigationUpdate(bool trigger, float tdsPpm) {
+void irrigationUpdate(bool trigger, float tdsPpm, bool tdsValid) {
     // Edge-detect: 0->1 memulai siklus; trigger yang terus tinggi tidak
     // memicu siklus kedua (sekali per permintaan).
     static bool prevTrigger = false;
@@ -53,6 +53,14 @@ void irrigationUpdate(bool trigger, float tdsPpm) {
         break;
 
     case IRRIG_FERT: {
+        // Probe TDS tidak terbaca sah -> dosis MALAH dilewati (fail-safe):
+        // menebak konsentrasi dari angka garbage bisa membuat over- atau
+        // underpupuk. Air tetap dialirkan ke tanaman (DIST).
+        if (!tdsValid) {
+            Serial.println("[irigasi] TDS tidak valid - dosis pupuk dilewati, lanjut DIST");
+            nextPhase(IRRIG_DIST);
+            break;
+        }
         // Pulse: pompa fert nyala 2s (mengaduk larutan) -> jeda 1s (sampling TDS
         // saat air masih bergerak dari pulse terakhir, pembacaan lebih stabil).
         unsigned long t = now - phaseStart;

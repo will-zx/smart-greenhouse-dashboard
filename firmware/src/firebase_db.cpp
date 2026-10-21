@@ -6,10 +6,22 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <time.h>
 
 static WiFiClientSecure client;
 static HTTPClient http;
+
+// ==== TLS (P2-12) — MASIH PROTOTYPING ====
+// Semua koneksi memakai client.setInsecure() -> verifikasi CA dimatikan.
+// Risikonya nyata: siapa pun yang bisa melakukan MITM di access point bisa
+// mencuri password akun perangkat + idToken dan mengirim perintah aktuator.
+//
+// Memperbaikinya (client.setCACert(<root CA Google>)) harus dilakukan sebagai
+// langkah TERPISAH dan diuji di device: boot -> WiFi tersambung -> login
+// perangkat OK -> push sensor_logs OK. Jangan patch buta: CA yang salah
+// membuat semua koneksi gagal diam-diam (device Offline tanpa jejak).
+// Lihat catatan "Hardware gotchas" di AGENTS.md.
 
 // Token akun perangkat. Valid 1 jam; di-refresh sebelum itu agar tidak
 // expired di tengah push.
@@ -25,8 +37,14 @@ static bool ensureToken() {
     client.setInsecure();
     String url = String("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=")
                  + FIREBASE_API_KEY;
-    String body = String("{\"email\":\"") + DEVICE_EMAIL + "\",\"password\":\""
-                  + DEVICE_PASSWORD + "\",\"returnSecureToken\":true}";
+    // Body dibangun dengan ArduinoJson: password dengan karakter khusus
+    // (" atau \) bikin JSON rusak kalau dirakit manual dengan string.
+    JsonDocument req;
+    req["email"] = DEVICE_EMAIL;
+    req["password"] = DEVICE_PASSWORD;
+    req["returnSecureToken"] = true;
+    String body;
+    serializeJson(req, body);
 
     http.begin(client, url);
     http.addHeader("Content-Type", "application/json");
@@ -58,8 +76,42 @@ static void invalidateToken() {
     tokenExpiryMs = 0;
 }
 
-// ponytail: setInsecure(true) melepas verifikasi CA. Ceiling: development/test.
-// Untuk produksi: client.setCACert(<root cert google>) — tambah ~2KB flash.
+// ==== Cooldown perintah restart ====
+// Disimpan di NVS (bukan hanya RAM) supaya reboot berulang-ulang dari admin
+// tidak lolos: setiap reboot menghapus RAM, jadi cooldown harus bertahan.
+static Preferences prefsCmd;
+static bool     restartStateLoaded = false;
+static time_t   lastRestartEpoch = 0;      // epoch detik restart terakhir
+static unsigned long lastRestartMs = 0;     // fallback kalau jam belum sinkron
+
+static void loadRestartState() {
+    if (restartStateLoaded) return;
+    restartStateLoaded = true;
+    prefsCmd.begin("smartgh_cmd", true);
+    lastRestartEpoch = (time_t)prefsCmd.getULong("last_restart", 0);
+    prefsCmd.end();
+}
+
+static bool restartBlocked() {
+    loadRestartState();
+    time_t now = time(nullptr);
+    if (now >= 100000 && lastRestartEpoch > 0) {
+        return (now - lastRestartEpoch) < (time_t)(RESTART_COOLDOWN_MS / 1000UL);
+    }
+    return lastRestartMs != 0 && (millis() - lastRestartMs) < RESTART_COOLDOWN_MS;
+}
+
+static void markRestart() {
+    lastRestartMs = millis();
+    lastRestartEpoch = time(nullptr);
+    prefsCmd.begin("smartgh_cmd", false);
+    prefsCmd.putULong("last_restart", (unsigned long)lastRestartEpoch);
+    prefsCmd.end();
+}
+
+// ponytail: setInsecure(true) melepas verifikasi CA (lihat catatan TLS di
+// atas). Ceiling: development/test. Untuk produksi: client.setCACert(<root
+// cert google>) — tambah ~2KB flash.
 static bool httpPost(const String& path, const String& body) {
     if (!ensureToken()) return false;
     client.setInsecure();
@@ -72,26 +124,35 @@ static bool httpPost(const String& path, const String& body) {
     return code >= 200 && code < 300;
 }
 
+// NaN/Inf tidak boleh masuk RTDB (diparse sebagai null dan merusak grafik
+// dashboard) -> field yang tidak valid simply tidak dikirim.
+static void putNum(JsonDocument& doc, const char* key, float v) {
+    if (isnan(v) || isinf(v)) return;
+    doc[key] = v;
+}
+
 bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
                    float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
                    String* bodyOut) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
-    // ts = epoch (NTP). Skip saat NTP belum sinkron supaya tidak tercatat epoch 1970.
+    // ts = epoch (NTP). Kalau NTP belum sinkron, record TETAP dikirim (tanda
+    // kehidupan device) tapi TANPA field ts — epoch 1970 tidak boleh masuk
+    // RTDB karena dashboard mengurutkan/menghitung umurnya dari ts.
     time_t ts = time(nullptr);
-    if (ts < 100000) return false;
+    bool timeOk = (ts >= 100000);
 
     JsonDocument doc;
-    doc["temperature"] = temperature;
-    doc["humidity"] = humidity;
-    doc["soil"] = soil;
-    doc["vpd"] = vpd;
-    doc["et0"] = etc;
-    doc["tds"] = tds;
+    putNum(doc, "temperature", temperature);
+    putNum(doc, "humidity", humidity);
+    putNum(doc, "soil", soil);
+    putNum(doc, "vpd", vpd);
+    putNum(doc, "et0", etc);
+    putNum(doc, "tds", tds);
     // Keluaran fuzzy = perintah aktuator yang dijalankan. Dashboard memakai
     // angka ini, bukan menguraikan string status_sistem.
-    doc["blower_level"] = blowerLevel;
+    putNum(doc, "blower_level", blowerLevel);
     doc["misting"] = misting;
     doc["irigasi"] = irigasi;
     doc["status_sistem"] = statusSistem;
@@ -103,7 +164,8 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     doc["fase_durasi_s"] = phase.durationSec;
     doc["fase_elapsed_s"] = phase.elapsedSec;
     doc["fase_sisa_s"] = phase.remainingSec;
-    doc["ts"] = ts;
+    doc["time_synced"] = timeOk;
+    if (timeOk) doc["ts"] = ts;
     doc["device"] = DEVICE_ID;
     String body;
     serializeJson(doc, body);
@@ -169,34 +231,48 @@ void pollCommands() {
         controlSet(C_BLOWER, on);
     } else if (strcmp(action, "set_vpd") == 0) {
         // value = VPD target (kPa). Contoh: {"action":"set_vpd","value":1.2}
+        // Hanya rentang hortikultura yang diterima; target 10 kPa membuat
+        // sistem tidak pernah misting sama sekali.
         if (value.is<int>() || value.is<float>()) {
             float v = value.as<float>();
-            phaseSetVpd(v);
-            Serial.printf("[fb] set VPD target: %.2f kPa\n", v);
+            if (phaseSetVpd(v)) {
+                Serial.printf("[fb] set VPD target: %.2f kPa\n", v);
+            } else {
+                Serial.printf("[fb] set_vpd ditolak: %.2f kPa di luar rentang %.1f-%.1f kPa\n",
+                              v, VPD_TARGET_MIN, VPD_TARGET_MAX);
+            }
         } else {
             Serial.println("[fb] set_vpd: nilai tidak valid");
         }
     } else if (strcmp(action, "set_fase") == 0 || strcmp(action, "set_phase") == 0) {
         // value = nama fase. Contoh: {"action":"set_fase","value":"Generatif"}
+        // value kosong/null = matikan mode setpoint/fase (kembali ke fuzzy).
         const char* nm = value | "";
-        if (nm[0] != '\0') {
+        if (value.isNull() || nm[0] == '\0') {
+            phaseDeactivate();
+            Serial.println("[fb] fase nonaktif - keputusan sepenuhnya kembali ke fuzzy");
+        } else {
             phaseSetName(nm);
             Serial.printf("[fb] set fase: %s\n", nm);
-        } else {
-            Serial.println("[fb] set_fase: nama kosong");
         }
     } else if (strcmp(action, "set_durasi") == 0 || strcmp(action, "set_duration") == 0) {
         // value = angka; unit opsional "detik"|"menit"|"jam"|"hari" (default detik).
         // Contoh: {"action":"set_durasi","value":14,"unit":"hari"}
         float num = value | 0.0f;
         const char* unit = target["unit"] | "detik";
-        uint32_t sec = (uint32_t)num;
-        if (strcmp(unit, "menit") == 0)      sec = (uint32_t)(num * 60.0f);
-        else if (strcmp(unit, "jam") == 0)   sec = (uint32_t)(num * 3600.0f);
-        else if (strcmp(unit, "hari") == 0)  sec = (uint32_t)(num * 86400.0f);
-        phaseSetDuration(sec);
-        Serial.printf("[fb] set durasi fase: %.0f %s (%lu detik)\n",
-                      num, unit, (unsigned long)sec);
+        double sec = num;
+        if (strcmp(unit, "menit") == 0)      sec = num * 60.0;
+        else if (strcmp(unit, "jam") == 0)   sec = num * 3600.0;
+        else if (strcmp(unit, "hari") == 0)  sec = num * 86400.0;
+        // Cek overflow uint32 + nilai tidak masuk akal sebelum dikonversi.
+        if (isnan(num) || num < 0.0f || sec > (double)PHASE_MAX_DURATION_SEC) {
+            Serial.printf("[fb] set_durasi ditolak: %.2f %s (di luar 0..%lu detik)\n",
+                          num, unit, (unsigned long)PHASE_MAX_DURATION_SEC);
+        } else {
+            phaseSetDuration((uint32_t)sec);
+            Serial.printf("[fb] set durasi fase: %.0f %s (%lu detik)\n",
+                          num, unit, (unsigned long)sec);
+        }
     } else if (strcmp(action, "fase_reset") == 0 || strcmp(action, "phase_reset") == 0) {
         phaseReset();
         Serial.println("[fb] fase direset (penghitung durasi mulai dari nol)");
@@ -221,12 +297,17 @@ void pollCommands() {
     if (isRestart) {
         // ponytail: restart hanya kalau DELETE berhasil. Kalau gagal, jangan restart
         // (perintah akan terbaca lagi). device tetap jalan & bisa di-restart manual.
-        if (delCode >= 200 && delCode < 300) {
+        if (delCode < 200 || delCode >= 300) {
+            Serial.printf("[fb] restart dibatalkan: DELETE perintah gagal (HTTP %d)\n", delCode);
+        } else if (restartBlocked()) {
+            // Cooldown: reboot berulang memutus siklus irigasi.
+            Serial.printf("[fb] restart ditolak: cooldown %lu s\n",
+                          (unsigned long)(RESTART_COOLDOWN_MS / 1000UL));
+        } else {
+            markRestart();
             Serial.println("[fb] perintah restart, perangkat restart...");
             delay(200);   // beri waktu DELETE selesai di sisi server
             ESP.restart();
-        } else {
-            Serial.printf("[fb] restart dibatalkan: DELETE perintah gagal (HTTP %d)\n", delCode);
         }
     }
 }

@@ -86,6 +86,10 @@
 // ponytail: nilai sementara dari pembacaan serial; kalibrasi ulang setelah ukur titik basah.
 #define SOIL_DRY   2644
 #define SOIL_WET   1200
+// Toleransi raw ADC di luar titik kalibrasi. Probe dicabut -> ADC mengambang
+// (0 atau 4095) -> di luar rentang ini -> ditandai tidak valid (bukan 100 %
+// basah / 0 % kering palsu). Angka ini hanya "jaring pengaman", bukan kalibrasi.
+#define SOIL_RAW_TOL 300
 
 // TDS Meter v1.0 (analog, klon DFRobot SEN0244) di ember campuran irigasi.
 // Output ~0..2.3V. GPIO35 = ADC input-only tanpa pull-up. Kompensasi suhu
@@ -95,6 +99,13 @@
 #define TDS_REF_VOLT    3.3
 #define TDS_TARGET_PPM  1000.0  // konsentrasi larutan akhir (air penampungan ~400 ppm)
 #define TDS_CAL_K       1.0
+// Rentang raw ADC yang dianggap sah (probe terendam, bukan mengambang / dicabut)
+// dan rentang ppm. Di luar itu TDS ditandai tidak valid -> dosis pupuk tidak
+// dihitung dari angka garbage.
+#define TDS_RAW_MIN     200
+#define TDS_RAW_MAX     3000
+#define TDS_PPM_MIN     50.0f
+#define TDS_PPM_MAX     5000.0f
 
 // Filter EMA (Exponential Moving Average): y[n] = alpha*x[n] + (1-alpha)*y[n-1].
 // alpha kecil = lebih halus tapi lebih lambat. Dipakai untuk suhu & kelembaban
@@ -110,10 +121,22 @@
 // suhu/kelembapan supaya gate target TDS tidak bereaksi pada satu sampel.
 #define EMA_ALPHA_TDS   0.3f
 
-// Kontrol VPD berbasis setpoint fase (di-set admin dari dashboard). Jika VPD
-// target aktif: VPD > target+BAND -> MISTING; VPD < target-BAND -> BLOWER;
-// dalam band -> OFF. Manual override tetap menang.
+// Kontrol VPD berbasis setpoint fase (di-set admin dari dashboard). Setpoint
+// ini KOREKSI terhadap keluaran fuzzy, bukan pengganti: fuzzy tetap menentukan
+// apa yang dijalankan, setpoint hanya mendorong satu arah.
+// VPD > target+BAND -> tambah/pertahankan misting (blower tetap sesuai fuzzy).
+// VPD < target-BAND -> dorong blower proporsional (misting tetap sesuai fuzzy).
+// Di dalam band -> fuzzy menentukan sepenuhnya.
 #define VPD_BAND_KPA    0.2f
+// Duty maksimum yang boleh ditambahkan setpoint ke blower. Setpoint tidak
+// pernah menaikkan blower ke penuh mendadak; duty penuh hanya bila fuzzy
+// juga memintanya.
+#define VPD_BOOST_MAX   0.6f
+// Rentang VPD target yang diterima dari dashboard (kPa). Di luar ini perintah
+// ditolak di sisi device (VPD wajar hortikultura: 0,3-2,5 kPa).
+#define VPD_TARGET_MIN  0.3f
+#define VPD_TARGET_MAX  2.5f
+
 
 // Setelan fase default (dipakai bila NVS masih kosong). Admin dapat mengubah
 // nama fase, VPD target, dan durasi dari dashboard; tersimpan di NVS.
@@ -121,5 +144,19 @@
 #define PHASE_DEFAULT_NAME      "Vegetatif"
 #define PHASE_DEFAULT_DURATION  0u         // detik; 0 = tanpa batas
 #define NVS_NAMESPACE           "smartgh"
+
+// Batas durasi override manual (ms). Setelah lewat, aktuator yang di-override
+// otomatis kembali ke kendali fuzzy — misting tidak boleh menyala semalaman.
+#define MANUAL_MAX_MS           600000UL   // 10 menit
+
+// Timeout Task WDT (detik) + inisialisasi eksplisit (lihat RumahHijau.ino).
+#define WDT_TIMEOUT_S           5
+
+// Cooldown perintah restart (ms) supaya reboot berulang tidak memutus
+// siklus irigasi.
+#define RESTART_COOLDOWN_MS     60000UL
+
+// Durasi fase maksimum (detik) = 365 hari, biar tidak overflow uint32.
+#define PHASE_MAX_DURATION_SEC  31536000UL
 
 #endif
