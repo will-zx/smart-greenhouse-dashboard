@@ -100,6 +100,8 @@ const toggleView = () => { state.view = state.view === 'log' ? 'beranda' : 'log'
         </div>
         <PhasePanel />
         <TrendChart />
+        <!-- Grafik Air: komponen yang sama, dataset berbeda (mode="air"). -->
+        <TrendChart mode="air" />
       </section>
 
       <!-- ============ LOG SENSOR ============ -->

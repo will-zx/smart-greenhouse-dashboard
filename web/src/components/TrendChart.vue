@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip } from 'chart.js';
-import { state, fmtClock, fmtNum, saneSoil, humanAge, zoneName, refreshWithSpin } from '../store.js';
+import { state, fmtClock, humanAge, TREND_RANGE, setTrendRange, trendData, zoneName, refreshWithSpin } from '../store.js';
 
 // Registrasi manual (bukan chart.js/auto) supaya bundel hanya membawa yang dipakai.
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip);
@@ -9,26 +9,116 @@ Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryS
 // Grafik membaca palet yang sama dengan Tailwind, jadi tidak ada warna yang
 // "melenceng" dari skema dashboard.
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = {
+  danger: cssVar('--color-danger'), accent: cssVar('--color-accent'),
+  warn: cssVar('--color-warn'), ok: cssVar('--color-ok'),
+  muted: cssVar('--color-muted'), card2: cssVar('--color-card-2'),
+};
+
+const props = defineProps({
+  // iklim (default): Suhu + RH, perilaku lama apa adanya. air: VPD + kebutuhan/
+  // pemakaian air hari ini. Satu komponen, dua dataset-set, maks. 2 sumbu Y.
+  mode: { type: String, default: 'iklim' },
+});
+const air = props.mode === 'air';
+
+function line(label, color, yAxisID, extra = {}) {
+  return {
+    label, yAxisID, data: [],
+    borderColor: color, pointBackgroundColor: color,
+    pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0,
+    ...extra,
+  };
+}
+
+// Garis putus-putus = "rencana" (target VPD, kebutuhan dari ETc) — tanpa
+// titik supaya tidak menutupi garis solid metaliknya (VPD, terpakai).
+const datasets = air ? [
+  line('VPD (kPa)', C.accent, 'y'),
+  line('Target VPD (kPa)', C.muted, 'y', { borderDash: [6, 4], pointRadius: 0 }),
+  line('Kebutuhan (mL)', C.warn, 'y1', { borderDash: [6, 4], pointRadius: 0 }),
+  line('Terpakai hari ini (mL)', C.ok, 'y1', { stepped: 'before' }),
+] : [
+  line('Suhu (°C)', C.danger, 'y'),
+  line('Kelembapan (%)', C.accent, 'y1'),
+];
+// Field di trendData yang mengisi tiap dataset, urut sesuai datasets di atas.
+const KEYS = air
+  ? ['vpd', 'vpdTarget', 'budgetMl', 'usedMl']
+  : ['temperature', 'humidity'];
+
+// suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
+// garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
+// seperti lonjakan besar.
+const scales = air ? {
+  x: {
+    grid: { color: C.card2 },
+    ticks: { color: C.muted, maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 }
+  },
+  y: {
+    type: 'linear', position: 'left', suggestedMin: 0, suggestedMax: 4,
+    grid: { color: C.card2 }, border: { display: false },
+    ticks: { color: C.accent, maxTicksLimit: 6 },
+    title: { display: true, text: 'VPD (kPa)', color: C.accent, font: { weight: 600 } }
+  },
+  // Sumbu kanan memuat dua seri (kebutuhan dashed + terpakai solid), jadi
+  // warna netral abu — bukan warna salah satu seri.
+  y1: {
+    type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 12000,
+    grid: { drawOnChartArea: false }, border: { display: false },
+    ticks: { color: C.muted, maxTicksLimit: 6 },
+    title: { display: true, text: 'Volume (mL)', color: C.muted, font: { weight: 600 } }
+  }
+} : {
+  x: {
+    grid: { color: C.card2 },
+    ticks: { color: C.muted, maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 }
+  },
+  y: {
+    type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40,
+    grid: { color: C.card2 }, border: { display: false },
+    ticks: { color: C.danger, maxTicksLimit: 6 },
+    title: { display: true, text: 'Suhu (°C)', color: C.danger, font: { weight: 600 } }
+  },
+  y1: {
+    type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100,
+    grid: { drawOnChartArea: false }, border: { display: false },
+    ticks: { color: C.accent, maxTicksLimit: 6 },
+    title: { display: true, text: 'Kelembapan (%)', color: C.accent, font: { weight: 600 } }
+  }
+};
 
 const el = ref(null);
 let chart;
 
+// Sumbu X sudah menunjuk waktunya, jadi cukup "nilai + satuan" - tidak perlu
+// mengulang label.
+const label = c => {
+  if (!air) {
+    return ' ' + c.dataset.label.replace(/\s*\(.*\)/, '') + ': ' +
+      c.parsed.y.toFixed(2) + ' ' + (c.dataset.yAxisID === 'y' ? '°C' : '%');
+  }
+  if (c.datasetIndex === 0) return ' VPD: ' + c.parsed.y.toFixed(2) + ' kPa';
+  if (c.datasetIndex === 1) return ' Target VPD: ' + c.parsed.y.toFixed(2) + ' kPa';
+  if (c.datasetIndex === 2) {
+    // Kebutuhan ditulis lengkap dengan ETc penyusunnya, dari record yang sama.
+    const etc = trendData.value[c.dataIndex]?.etc;
+    return ' Kebutuhan: ' + Math.round(c.parsed.y) + ' mL' +
+      (etc !== null && etc !== undefined ? ' (ETc ' + etc.toFixed(2) + ' mm/hari)' : '');
+  }
+  return ' Terpakai hari ini: ' + Math.round(c.parsed.y) + ' mL';
+};
+
 onMounted(() => {
   chart = new Chart(el.value, {
     type: 'line',
-    data: {
-      labels: [],
-      datasets: [
-        { label: 'Suhu (°C)', data: [], borderColor: cssVar('--color-danger'), pointBackgroundColor: cssVar('--color-danger'), pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0, yAxisID: 'y' },
-        { label: 'Kelembapan (%)', data: [], borderColor: cssVar('--color-accent'), pointBackgroundColor: cssVar('--color-accent'), pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, tension: 0, yAxisID: 'y1' }
-      ]
-    },
+    data: { labels: [], datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      // Legenda diletakkan di bawah-tengah seperti grafik referensi: lebih
-      // rapi dan tidak memakan ruang di dekat judul kartu.
+      // Legenda di bawah-tengah seperti grafik referensi: lebih rapi dan
+      // tidak memakan ruang di dekat judul kartu.
       plugins: {
         legend: {
           position: 'bottom',
@@ -36,54 +126,27 @@ onMounted(() => {
         },
         tooltip: {
           padding: 10, boxWidth: 8, boxHeight: 8, usePointStyle: true,
-          callbacks: {
-            // Sumbu X sudah menunjuk waktunya, jadi cukup tampilkan
-            // "label + nilai + satuan" - tidak perlu mengulang label.
-            label: c => ' ' + c.dataset.label.replace(/\s*\(.*\)/, '') + ': ' +
-              c.parsed.y.toFixed(2) + ' ' + (c.dataset.yAxisID === 'y' ? '°C' : '%')
-          }
+          callbacks: { label }
         }
       },
-      scales: {
-        // suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
-        // garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
-        // seperti lonjakan besar.
-        x: {
-          grid: { color: cssVar('--color-card-2') },
-          ticks: { color: cssVar('--color-muted'), maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 }
-        },
-        y: {
-          type: 'linear', position: 'left', suggestedMin: 20, suggestedMax: 40,
-          grid: { color: cssVar('--color-card-2') },
-          border: { display: false },
-          ticks: { color: cssVar('--color-danger'), maxTicksLimit: 6 },
-          title: { display: true, text: 'Suhu (°C)', color: cssVar('--color-danger'), font: { weight: 600 } }
-        },
-        y1: {
-          type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100,
-          grid: { drawOnChartArea: false },
-          border: { display: false },
-          ticks: { color: cssVar('--color-accent'), maxTicksLimit: 6 },
-          title: { display: true, text: 'Kelembapan (%)', color: cssVar('--color-accent'), font: { weight: 600 } }
-        }
-      }
+      scales,
     }
   });
   sync();
 });
 
-// Data berubah setiap 10 s (polling) -> grafik ikut, tanpa render ulang manual.
-watch(() => state.logData, sync);
+// Data berubah tiap polling (10 s / 120 s) dan saat ganti rentang -> grafik
+// ikut tanpa render ulang manual, karena trendData computed dari store.
+watch(trendData, sync);
 
 function sync() {
   if (!chart) return;
-  // Sumbu X: jam saja — label penuh ("11/10/2026, 22.27.15") tidak muat.
-  // Record tanpa ts (jam perangkat belum sinkron) dapat label "?".
-  chart.data.labels = state.logData.map(l => fmtClock(l.ts));
-  // Record tanpa nilai sensor (field dihapus firmware) -> null, bukan 0:
+  // Sumbu X: jam saja — label penuh tidak muat. Record tanpa ts (jam perangkat
+  // belum sinkron) tetap dapat label "?".
+  chart.data.labels = trendData.value.map(l => fmtClock(l.ts));
+  // Field yang tidak ada (record lama / sensor invalid) -> null, bukan 0:
   // Chart.js menggambar celah, jadi tidak ada titik 0 palsu di grafik.
-  chart.data.datasets[0].data = state.logData.map(l => l.temperature);
-  chart.data.datasets[1].data = state.logData.map(l => l.humidity);
+  chart.data.datasets.forEach((ds, i) => { ds.data = trendData.value.map(l => l[KEYS[i]]); });
   chart.update();
 }
 
@@ -99,13 +162,25 @@ onUnmounted(() => chart?.destroy());
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="flex items-center gap-[7px] text-[15px] font-semibold">
         <svg class="shrink-0 text-accent" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 14l4-4 4 4 5-6"/></svg>
-        Grafik Tren Sensor
-        <span class="font-medium text-muted">{{ zoneName() }}</span>
+        {{ air ? 'Grafik Air' : 'Grafik Iklim' }}
+        <!-- Nama unit cukup sekali: kartu air selalu tepat di bawah kartu
+             iklim untuk unit yang sama. -->
+        <span v-if="!air" class="font-medium text-muted">{{ zoneName() }}</span>
       </h2>
-      <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-ink hover:bg-card-2" title="Muat ulang data sensor" @click="refreshWithSpin()">
-        <svg class="text-accent" :class="state.spinning && 'animate-spin'" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
-        Refresh
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- Kedua kartu memakai state.trendRange yang sama: klik di salah
+             satu mengubah keduanya (plus jendela fetch & interval poll). -->
+        <div class="flex items-center rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Rentang waktu grafik">
+          <button v-for="(r, k) in TREND_RANGE" :key="k" type="button"
+                  class="rounded-md px-2.5 py-1 text-xs font-semibold transition-colors"
+                  :class="state.trendRange === k ? 'bg-accent text-white' : 'text-muted hover:bg-card-2'"
+                  @click="setTrendRange(k)">{{ r.label }}</button>
+        </div>
+        <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-ink hover:bg-card-2" title="Muat ulang data sensor" @click="refreshWithSpin()">
+          <svg class="text-accent" :class="state.spinning && 'animate-spin'" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+          Refresh
+        </button>
+      </div>
     </div>
 
     <div class="relative h-[320px] max-[700px]:h-[240px]">
@@ -113,8 +188,9 @@ onUnmounted(() => chart?.destroy());
     </div>
 
     <!-- Umur data di bawah grafik, bukan di header: pengguna bisa membedakan
-         "sensor diam 40 detik" dari "dashboardnya yang macet". -->
-    <p class="mt-3 min-h-4 text-xs text-muted">
+         "sensor diam 40 detik" dari "dashboardnya yang macet". Cukup di kartu
+         iklim — kartu air selalu tepat di bawahnya. -->
+    <p v-if="!air" class="mt-3 min-h-4 text-xs text-muted">
       <template v-if="state.online">
         <template v-if="state.age === null">Jam perangkat belum sinkron — record terakhir tidak punya field ts</template>
         <template v-else>Data terakhir {{ humanAge(state.age) }} lalu</template>
