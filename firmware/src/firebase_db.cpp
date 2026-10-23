@@ -123,6 +123,27 @@ static bool     restartStateLoaded = false;
 static time_t   lastRestartEpoch = 0;      // epoch detik restart terakhir
 static unsigned long lastRestartMs = 0;     // fallback kalau jam belum sinkron
 
+// ==== Penanda perintah terakhir yang sudah dieksekusi ====
+// Aturan RTDB memberi device izin BACA saja di /commands (tulis = admin), jadi
+// DELETE dari device ditolak (401) dan entri tidak pernah hilang. Disimpan di
+// NVS supaya perintah yang sama tidak dieksekusi ulang tiap poll 5 s, termasuk
+// setelah reboot.
+static String lastCmdKey;
+static bool   lastCmdLoaded = false;
+
+static void loadLastCmd() {
+    if (lastCmdLoaded) return;
+    lastCmdLoaded = true;
+    prefsCmd.begin("smartgh_cmd", true);
+    lastCmdKey = prefsCmd.getString("last_cmd", "");
+    prefsCmd.end();
+    // Push ID Firebase panjang (>= 20 karakter). Key pendek = sampah hasil PUT
+    // ke /commands/{id}.json (mis. "action"/"value") yang secara leksikografis
+    // BISA lebih besar dari semua push ID asli -> high-water mark rusak dan
+    // semua perintah berikutnya ikut terabaikan.
+    if (lastCmdKey.length() < 10) lastCmdKey = "";
+}
+
 static void loadRestartState() {
     if (restartStateLoaded) return;
     restartStateLoaded = true;
@@ -279,17 +300,36 @@ void pollCommands() {
     if (err || cmds.size() == 0) return;
 
     // ponytail: mengurutkan dengan string compare push-ID Firebase (terurut waktu).
+    // Ceiling: hanya konsisten untuk push-ID satu generasi format (yang lama
+    // "-P3..." vs yang baru "mv..."); campuran dua format bisa salah urut.
+    // Perbaikan sebenarnya: izinkan device menghapus /commands miliknya sendiri
+    // di aturan RTDB, supaya entri tidak menumpuk sama sekali.
     // Ceiling: semua perintah ter-fetch tiap 5s; jika volume perintah besar, pakai
     // orderBy="$value/createdAt"&limitToFirst=1 di query (butuh field sort ekstra).
     // Firebase push-ID terurut; kunci terendah = perintah terlama.
+    //
+    // PENTING: perintah yang sudah dieksekusi diingat lewat key terakhir di NVS.
+    // Aturan RTDB hanya memberi device izin BACA di /commands (tulis = admin),
+    // jadi DELETE dari device ditolak 401 dan entri TIDAK pernah hilang. Tanpa
+    // penanda ini, entri yang sama dieksekusi ulang tiap poll 5 s (blower/pompa
+    // nyala terus, log spam). Push-ID terurut leksikografis, jadi cukup simpan
+    // key tertinggi yang sudah dieksekusi; key <= itu dianggap sudah selesai.
+    loadLastCmd();
     const char* oldest = nullptr;
-    JsonObject target;
-    for (JsonPair kv : cmds) {
-        if (oldest == nullptr || strcmp(kv.key().c_str(), oldest) < 0) {
-            oldest = kv.key().c_str();
+    JsonObject target;    for (JsonPair kv : cmds) {
+        // Lewati key yang bukan objek perintah. Node /commands bisa tercemar
+        // field "action"/"value" tingkat node (hasil PUT ke /commands/{id}.json
+        // alih-alih POST ke anaknya); key seperti itu bukan perintah.
+        if (!kv.value().is<JsonObject>()) continue;
+        const char* k = kv.key().c_str();
+        if (lastCmdKey.length() && strcmp(k, lastCmdKey.c_str()) <= 0) continue;
+        if (oldest == nullptr || strcmp(k, oldest) < 0) {
+            oldest = k;
             target = kv.value().as<JsonObject>();
         }
     }
+
+    if (oldest == nullptr) return;   // semua perintah sudah pernah dijalankan
 
     const char* action = target["action"] | "";
     JsonVariant value = target["value"];
@@ -369,10 +409,18 @@ void pollCommands() {
     int delCode = http.sendRequest("DELETE", "");
     http.end();
 
+    // Penanda lokal (NVS): perintah ini sudah dijalankan, jangan diulang walau
+    // DELETE ditolak aturan RTDB (device hanya boleh baca /commands).
+    lastCmdKey = oldest;
+    prefsCmd.begin("smartgh_cmd", false);
+    prefsCmd.putString("last_cmd", lastCmdKey);
+    prefsCmd.end();
+
+    bool delOk = delCode >= 200 && delCode < 300;
     if (isRestart) {
         // ponytail: restart hanya kalau DELETE berhasil. Kalau gagal, jangan restart
         // (perintah akan terbaca lagi). device tetap jalan & bisa di-restart manual.
-        if (delCode < 200 || delCode >= 300) {
+        if (!delOk) {
             Serial.printf("[fb] restart dibatalkan: DELETE perintah gagal (HTTP %d)\n", delCode);
         } else if (restartBlocked()) {
             // Cooldown: reboot berulang memutus siklus irigasi.
@@ -383,6 +431,17 @@ void pollCommands() {
             Serial.println("[fb] perintah restart, perangkat restart...");
             delay(200);   // beri waktu DELETE selesai di sisi server
             ESP.restart();
+        }
+    } else if (!delOk) {
+        // Dicetak sekali per boot: menandakan aturan RTDB tidak mengizinkan
+        // device menghapus /commands -> entri menumpuk (bersihkan dari dashboard
+        // admin atau longgarkan aturan). Perintah tetap tidak diulang berkat
+        // penanda last_cmd.
+        static bool deleteWarned = false;
+        if (!deleteWarned) {
+            deleteWarned = true;
+            Serial.printf("[fb] DELETE perintah ditolak (HTTP %d) - aturan RTDB "
+                          "hanya izinkan admin menulis /commands\n", delCode);
         }
     }
 }
