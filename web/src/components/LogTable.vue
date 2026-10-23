@@ -1,9 +1,10 @@
 <script setup>
-import { state, filteredLogs, fmtLogTime, fmtNum, saneSoil, pillClass, fetchDataLogs, refreshWithSpin, zoneName, exportCsv } from '../store.js';
+import { state, filteredLogs, matchedLogs, fmtLogTime, fmtNum, saneSoil, pillClass, refreshWithSpin, zoneName, exportCsv } from '../store.js';
 
+// Batas baris yang DITAMPILKAN. Tidak fetch ulang: jendela data sudah berada
+// di memori (mis. 180 record untuk grafik 1 jam), dipotong di sisi klien.
 const setLimit = e => {
-  state.logLimit = parseInt(e.target.value, 10) || 20;
-  fetchDataLogs();   // jumlah baris berubah -> ambil ulang dari RTDB
+  state.logRows = parseInt(e.target.value, 10) || 20;
 };
 
 // Badge gangguan dibedakan dari "gagal baca" (offline) dan "data lama":
@@ -37,7 +38,7 @@ const warnPill = 'pill pill-warn';
     <div class="mb-3 flex flex-wrap items-center gap-3">
       <label class="flex items-center gap-1.5 text-[12.5px] text-muted" for="showEntries">
         Show
-        <select id="showEntries" :value="state.logLimit" class="rounded-md border border-border bg-card px-1.5 py-[3px] font-inherit text-[12.5px] text-ink"
+        <select id="showEntries" :value="state.logRows" class="rounded-md border border-border bg-card px-1.5 py-[3px] font-inherit text-[12.5px] text-ink"
                 @change="setLimit">
           <option :value="10">10</option>
           <option :value="20">20</option>
@@ -108,17 +109,18 @@ const warnPill = 'pill pill-warn';
     <p class="mt-3 min-h-4 text-xs text-muted">
       {{ filteredLogs.length
         ? (state.logFilter
-            ? `Menampilkan ${filteredLogs.length} dari ${state.logData.length} baris yang cocok`
+            ? `Menampilkan ${filteredLogs.length} dari ${matchedLogs.length} baris yang cocok`
             : `Menampilkan ${filteredLogs.length} baris terbaru`)
         : '' }}
     </p>
 
-    <!-- Retensi: dashboard hanya memuat baris terbaru (10/20/50) dan tidak
-         bisa menghapus apa pun dari RTDB. RTDB punya kuota storage 1 GB,
-         jadi log lama perlu kebijakan retensi (hapus berkala dari sisi
-         backend / arsip ke penyimpanan lain). -->
+    <!-- Retensi: dashboard hanya memuat jendela grafik (logLimit = 4320 record
+         ~24 jam / 1080 record ~6 jam) dan tabel menampilkan logRows terakhirnya;
+         tidak ada yang bisa menghapus apa pun dari RTDB. RTDB punya kuota
+         storage 1 GB, jadi log lama perlu kebijakan retensi (hapus berkala
+         dari sisi backend / arsip ke penyimpanan lain). -->
     <p class="mt-1 text-[11px] leading-snug text-muted">
-      Catatan retensi: dashboard hanya memuat {{ state.logLimit }} baris terbaru. Firebase RTDB punya kuota storage
+      Catatan retensi: dashboard memuat {{ state.logLimit }} baris terbaru dan tabel menampilkan {{ state.logRows }} baris terakhirnya. Firebase RTDB punya kuota storage
       1 GB — log lama perlu kebijakan retensi (mis. hapus berkala dari sisi backend atau arsip ke penyimpanan lain).
       Dashboard tidak menghapus data RTDB.
     </p>

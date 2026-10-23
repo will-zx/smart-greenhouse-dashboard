@@ -13,6 +13,17 @@ import { reactive, computed } from 'vue';
 const _zones = ZONES;
 export { _zones as ZONES };
 
+// -------------------------------------------------- rentang waktu grafik ---
+// Jendela waktu dua kartu grafik (iklim & air). limit = record yang di-fetch
+// dari RTDB (perangkat push tiap ~20 s), bucket = lebar grup down-sample
+// (detik), pollMs = interval polling. Rentang panjang dipoll lebih jarang:
+// 24 jam = 4320 record ~2.6 MB sekali fetch, jadi 15 menit sekali — ditambah
+// polling yang berhenti saat tab tidak terlihat, kuota Spark tetap aman.
+export const TREND_RANGE = {
+  '6j': { limit: 1080, bucket: 300, pollMs: 120000, label: '6 jam' },
+  '24j': { limit: 4320, bucket: 600, pollMs: 900000, label: '24 jam' },
+};
+
 export const state = reactive({
   // identitas & peran
   user: null,
@@ -26,7 +37,15 @@ export const state = reactive({
   logData: [],
   lastData: null,
   logFilter: '',
-  logLimit: 20,
+  // Jendela fetch grafik = lebar rentang terpanjang (24 jam: 4320 record).
+  // Jumlah entri yang DITAMPILKAN tabel log dibedakan lewat logRows di bawah.
+  logLimit: TREND_RANGE['24j'].limit,
+  // Rentang waktu grafik — dua kartu grafik (iklim & air) memakai state ini.
+  trendRange: '24j',
+  // Batas baris tabel log yang DITAMPILKAN (sisi klien, masih di dalam
+  // jendela fetch), bukan lagi pemicu fetch — select "Show entries" tidak
+  // perlu fetch ulang karena datanya sudah di memori.
+  logRows: 20,
 
   // tampilan
   view: 'beranda',
@@ -315,16 +334,111 @@ export async function fetchDataLogs() {
   }
 }
 
+// ----------------------------------------------- data grafik (down-sample) ---
+// Down-sample untuk grafik: dirata-ratakan per bucket (60 s / 300 s). Ditaruh
+// di store, bukan di komponen, supaya kedua kartu grafik menampilkan data
+// yang sama persis. null tidak ikut dirata-rata — rata-rata tetap null ->
+// Chart.js menggambar celah, bukan 0 palsu.
+const FLAT_FIELDS = ['temperature', 'humidity', 'vpd', 'etc', 'vpdTarget', 'budgetMl'];
+
+// Field trendData dipetakan flat dari baris normLog (grafik cuma butuh angka).
+function flatRow(r) {
+  return {
+    ts: r.ts,
+    temperature: r.temperature,
+    humidity: r.humidity,
+    vpd: r.vpd,
+    etc: r.etc,
+    vpdTarget: r.phase.target,
+    budgetMl: r.irigasiInfo.budgetMl,
+    usedMl: r.irigasiInfo.usedMl,
+  };
+}
+
+const avgOf = (rows, k) => {
+  let s = 0, n = 0;
+  for (const r of rows) {
+    const v = r[k];
+    if (typeof v === 'number' && isFinite(v)) { s += v; n++; }
+  }
+  return n ? s / n : null;
+};
+const lastOf = (rows, k) => {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const v = rows[i][k];
+    if (typeof v === 'number' && isFinite(v)) return v;
+  }
+  return null;
+};
+
+export const trendData = computed(() => {
+  const bucket = TREND_RANGE[state.trendRange].bucket;
+  const groups = new Map();   // slot -> baris flat dalam satu bucket
+  const out = [];
+  for (const r of state.logData) {
+    const f = flatRow(r);
+    // Tanpa ts (jam perangkat belum sync) tidak masuk bucket: semuanya akan
+    // jatuh ke slot 0 (1970) dan sumbu X kacau. Disimpan sebagai titik
+    // sendiri di akhir — sama seperti tampilan "?" sebelumnya.
+    if (f.ts === null) continue;
+    const slot = Math.floor(f.ts / bucket);
+    if (!groups.has(slot)) groups.set(slot, []);
+    groups.get(slot).push(f);
+  }
+  for (const [slot, rows] of groups) {
+    const g = { ts: slot * bucket };
+    for (const k of FLAT_FIELDS) g[k] = avgOf(rows, k);
+    // Kumulatif tidak boleh dirata-rata: tiga titik 20 s berisi 0/0/3764 kalau
+    // dirata-rata jadi 1255 — yang benar nilai TERAKHIR 3764.
+    g.usedMl = lastOf(rows, 'usedMl');
+    out.push(g);
+  }
+  for (const r of state.logData) if (r.ts === null) out.push(flatRow(r));
+  return out;
+});
+
 let timer = null;
 export function startPolling() {
   loadLabels().then(() => {
     fetchDataLogs();
-    timer = setInterval(fetchDataLogs, 10000);
+    startTimer();
   });
+  document.addEventListener('visibilitychange', onVisibility);
 }
 export function stopPolling() {
   clearInterval(timer);
   timer = null;
+  document.removeEventListener('visibilitychange', onVisibility);
+}
+
+function startTimer() {
+  if (timer) clearInterval(timer);
+  // Interval mengikuti rentang grafik: 6 jam = 2 menit, 24 jam = 15 menit.
+  timer = setInterval(fetchDataLogs, TREND_RANGE[state.trendRange].pollMs);
+}
+
+// Hemat kuota: tab tidak terlihat = tidak ada yang memantau -> polling
+// berhenti. Saat kembali visible, di-fetch sekali supaya data langsung segar.
+function onVisibility() {
+  if (document.visibilityState === 'hidden') {
+    clearInterval(timer);
+    timer = null;
+  } else {
+    fetchDataLogs();
+    startTimer();
+  }
+}
+
+// Ganti rentang grafik (1j/6j) — dipakai pill di header kedua kartu grafik.
+export function setTrendRange(r) {
+  if (!TREND_RANGE[r] || r === state.trendRange) return;
+  state.trendRange = r;
+  state.logLimit = TREND_RANGE[r].limit;
+  // Kosongkan jendela lama supaya grafik tidak menampilkan titik rentang lama
+  // dengan rentang baru (fetch ulang mengisinya seketika).
+  state.logData = [];
+  fetchDataLogs();
+  startTimer();   // interval polling ikut rentang baru
 }
 
 // ------------------------------------------------------------- kendali ---
@@ -384,11 +498,16 @@ export const actuators = computed(() => {
   };
 });
 
-export const filteredLogs = computed(() => {
+// Cocok-filter penuh (tanpa batas tampil) — dipakai pesan "dari N baris".
+export const matchedLogs = computed(() => {
   const f = state.logFilter;
   if (!f) return state.logData;
   return state.logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.status || '')).toLowerCase().includes(f));
 });
+
+// Tabel hanya menampilkan logRows baris terakhir dari jendela fetch
+// (180/1080 record untuk grafik) supaya tidak memanjang tak terkendali.
+export const filteredLogs = computed(() => matchedLogs.value.slice(-state.logRows));
 
 // Badge status aktif mengikuti isi teksnya, bukan warnanya.
 export const pillClass = s =>
