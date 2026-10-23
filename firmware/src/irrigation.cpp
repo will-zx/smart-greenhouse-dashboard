@@ -60,6 +60,15 @@ float calculateEtc() {
 }
 
 void irrigationFeedTemp(float temp) {
+    // PENTING: array static terisi 0,0 (bukan NaN), sedangkan sentinel "ember
+    // kosong" di sini adalah NaN. Tanpa inisialisasi ini isnan() tidak pernah
+    // true -> tmeanValid tidak pernah bertambah -> irrigationTmean() selalu
+    // NaN -> ETc 0 -> irigasi tidak pernah jalan (pernah terjadi di device).
+    static bool tmeanInit = false;
+    if (!tmeanInit) {
+        for (int k = 0; k < BC_TMEAN_BUCKETS; k++) tmeanBucket[k] = NAN;
+        tmeanInit = true;
+    }
     if (isnan(temp)) return;                 // jangan racuni jendela dengan NaN
     unsigned long bucket = millis() / BC_TMEAN_BUCKET_MS;
     if (bucket != tmeanBucketIdx) {
