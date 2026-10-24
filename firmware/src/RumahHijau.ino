@@ -175,8 +175,10 @@ static void controlTask(void* arg) {
             sensorData.soilMoisture = 50.0f;
         }
 
-        // TDS hanya telemetri (dashboard); dosis pupuk memakai pompa FERT yang
-        // ditunda. Nilainya tetap difilter EMA supaya angka yang tampil stabil.
+        // TDS dipakai sebagai PEMERIKSA di fase CHECK: dosis stok A/B jalan
+        // selama durasi tetap (lingkaran terbuka), jadi TDS memverifikasi
+        // dugaan itu, bukan mengendalikannya. Nilainya difilter EMA supaya
+        // angka yang tampil dan yang dinilai sama-sama stabil.
         bool tdsValid = false;
         float tdsSample = readTDS(sensorData.temperature, &tdsValid);
         if (tdsValid) tdsPpm = emaUpdate(tdsFilter, tdsSample);
@@ -277,11 +279,12 @@ static void controlTask(void* arg) {
         OverrideState ov = controlOverrides();
         setActuators(mist, blower, blowerLevel);
 
-        // Irigasi (siklus DIST saja): sensor SHT31 mati = batalkan siklus
-        // (fail-safe penuh: tanpa T/RH tidak ada ETc/VPD yang sah, override
-        // manual pun tidak boleh mengecualikan device dari fail-safe ini);
-        // selain itu serah ke irrigationUpdate() yang memutuskan mulai/tidak
-        // siklus dari trigger + jeda minimum + anggaran harian.
+        // Irigasi (siklus FILL -> FERT -> SETTLE -> CHECK -> DIST): sensor
+        // SHT31 mati = batalkan siklus (fail-safe penuh: tanpa T/RH tidak ada
+        // ETc/VPD yang sah, override manual pun tidak boleh mengecualikan
+        // device dari fail-safe ini); selain itu serah ke irrigationUpdate()
+        // yang memutuskan mulai/tidak siklus dari trigger + jeda minimum +
+        // anggaran harian. TDS dikirim supaya fase CHECK bisa menilainya.
         // Sakelar manual yang dimatikan TIDAK lagi membatalkan siklus: override
         // manual per aktuator, jadi mematikan sakelar berarti kembali ke fuzzy.
         if (!sensorData.valid) {
@@ -290,7 +293,7 @@ static void controlTask(void* arg) {
             // manual = override operator memaksa irigasi nyala (ov.irig == 1).
             // Perintah eksplisit itu boleh menembus jeda & anggaran harian,
             // tapi hanya satu siklus per permintaan manual.
-            irrigationUpdate(irigasi, ov.irig == 1);
+            irrigationUpdate(irigasi, ov.irig == 1, tdsPpm, tdsValid);
         }
         bool irigasiRunning = irrigationRunning();
         IrrigStatus irig = irrigationStatus();

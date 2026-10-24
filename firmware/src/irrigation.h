@@ -3,9 +3,15 @@
 
 #include <Arduino.h>
 
-// Siklus irigasi: IDLE -> DIST -> IDLE (satu pompa DIST saja; fertigasi
-// ditunda). Dipicu `trigger` (keputusan fuzzy ATAU override manual).
-enum IrrigPhase { IRRIG_IDLE, IRRIG_DIST };
+// Siklus fertigasi: IDLE -> FILL -> FERT -> SETTLE -> CHECK -> DIST -> IDLE.
+// Urutan ini dikunci: DIST tidak pernah mendahului CHECK, jadi larutan yang
+// belum diperiksa konsentrasinya tidak sampai ke tanaman.
+// Dipicu `trigger` (keputusan fuzzy ATAU override manual).
+enum IrrigPhase { IRRIG_IDLE, IRRIG_FILL, IRRIG_FERT, IRRIG_SETTLE,
+                  IRRIG_CHECK, IRRIG_DIST };
+
+// Nama fase ("FILL", "CHECK", ...) untuk log serial dan status_sistem.
+const char* irrigationPhaseName();
 
 // Status irigasi untuk telemetri (dashboard) & log.
 struct IrrigStatus {
@@ -25,7 +31,8 @@ void irrigationFeedTemp(float temp);
 // NaN bila belum ada sampel sah sama sekali.
 float irrigationTmean();
 
-// ETc (mm/hari) = Kc(fase) * p * (0,46*Tmean + 8).
+// ETc (mm/hari) = Kc(fase) * p(bulan) * (0,46*Tmean + 8), dengan p dari
+// Tabel FAO-24 untuk lintang Semarang (SUN_P_MONTH di config.h).
 // Pendekatan praktis Blaney-Criddle, BUKAN ETo standar FAO-56.
 float calculateEtc();
 
@@ -50,7 +57,14 @@ IrrigStatus irrigationStatus();
 // permintaan manual (sakelar harus dimatikan lalu dinyalakan lagi). Tanpa
 // batas ini, trigger manual yang tetap true akan membuat pompa menyala
 // terus-menerus.
-void irrigationUpdate(bool trigger, bool manual);
+//
+// tdsPpm/tdsValid dipakai di fase CHECK. Dosis stok A/B berjalan selama
+// IRRIG_FERT_MS (lingkaran terbuka, menurut debit pompa terukur), jadi TDS
+// hanya MEMVERIFIKASI dugaan itu. Kalau hasilnya di luar
+// TDS_MIN_PPM..TDS_MAX_PPM, holdReason diisi sebagai PERINGATAN untuk
+// dashboard tapi distribusi TETAP dijalankan - air yang tertahan lebih
+// berbahaya bagi tanaman daripada larutan yang sedikit meleset.
+void irrigationUpdate(bool trigger, bool manual, float tdsPpm, bool tdsValid);
 bool irrigationRunning();         // ada fase aktif (dipakai status_sistem)
 void irrigationAbort();           // sensor tidak valid / darurat -> pompa mati
 
