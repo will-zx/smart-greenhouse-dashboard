@@ -97,15 +97,17 @@ FreeRTOS.
 | --- | --- | --- | --- |
 | Misting | GPIO 26 | Digital | Penyiram kabut |
 | Blower (2 kipas paralel) | GPIO 25 | PWM 1 kHz, 8-bit | Ventilasi |
-| Pompa FILL | GPIO 13 | Digital | Isi ember campuran, 12 V (terpasang, tidak dipakai selama fertigasi ditunda) |
-| Pompa FERT A | GPIO 14 | Digital | Pupuk A, 5 V (terpasang, tidak dipakai selama fertigasi ditunda) |
-| Pompa FERT B | GPIO 15 | Digital | Pupuk B, 5 V (terpasang, tidak dipakai selama fertigasi ditunda) |
-| Pompa DIST | GPIO 32 | Digital | Salur ke tanaman, 12 V |
+| Pompa FILL | GPIO 13 | Digital | Isi ember campuran, 12 V |
+| Pompa FERT A | GPIO 14 | Digital | Pupuk A, 5 V |
+| Pompa FERT B | GPIO 15 | Digital | Pupuk B, 5 V |
+| Pompa DIST | GPIO 32 | Digital | Salur larutan ke tanaman, 12 V |
 
-Debit pompa DIST terukur 31,7 mL/s (gelas ukur + stopwatch, 3×, rata-rata).
-Kalibrasi irigasi — debit, luas media, dan jumlah siklus per hari — ada di
-`firmware/src/config.h`; dosis dan durasi pompa dihitung dari sana, bukan
-ditulis tetap.
+Debit terukur (gelas ukur + stopwatch, 3×, rata-rata): DIST 31,7 mL/s,
+FERT 22,2 mL/s. Kalibrasi irigasi — debit, luas media, jumlah siklus per hari,
+dan durasi tiap fase — ada di `firmware/src/config.h`; dosis dan durasi pompa
+dihitung dari sana, bukan ditulis tetap. Durasi fase FILL, FERT, dan SETTLE
+masih **perkiraan** dan ditandai `TODO` di `config.h` karena belum diukur di
+lapangan.
 
 ### Tambahan
 
@@ -121,7 +123,7 @@ modul XY-MOS aktif-LOW dapat dipakai tanpa mengubah kode.
 flowchart LR
   subgraph ESP ["ESP32 · controlTask (core 1) · tiap 2 detik"]
     direction LR
-    S["SHT31<br/>Soil · TDS"] --> F["filter EMA"] --> V["VPD · ETc"] --> Z{{"fuzzy Mamdani"}} --> A["aktuator<br/>misting · blower · pompa DIST"]
+    S["SHT31<br/>Soil · TDS"] --> F["filter EMA"] --> V["VPD · ETc"] --> Z{{"fuzzy Mamdani"}} --> A["aktuator<br/>misting · blower · pompa fertigasi"]
   end
   R[("Firebase RTDB")]
   D["Dashboard web"]
@@ -143,16 +145,41 @@ suhu, kelembapan, tanah, VPD, dan ETc. Aturan disimpan sebagai tabel di
 
 **VPD dan ETc.** VPD dihitung dengan rumus Tetens (`calcVpd` di
 `RumahHijau.ino`). ETc memakai metode Blaney-Criddle di `irrigation.cpp`: faktor
-p = 0,48, Tmean = rata-rata suhu sliding 3 jam, dan Kc mengikuti fase
-pertumbuhan (0,40 / 0,75 / 1,10 / 1,00 / 0,90).
+p = 0,266–0,284 per bulan (Tabel FAO-24 untuk lintang Semarang, ada di
+`config.h`), Tmean = rata-rata suhu sliding 3 jam, dan Kc mengikuti fase
+pertumbuhan (0,40 / 0,75 / 1,10 / 1,00 / 0,90). Angka p sebelumnya 0,48 berasal
+dari tafsir rumus FAO-24, bukan dari tabelnya, dan melebih ETo sekitar 65%.
 
-**Siklus irigasi.** Satu pompa DIST mengalirkan air dari penampungan utama ke
-tanaman. Dosis per siklus bukan timer tetap: dihitung dari ETc harian
+**Siklus irigasi.** Satu siklus berjalan enam fase berurutan:
+`FILL → FERT → SETTLE → CHECK → DIST`.
+
+| Fase | Pompa yang menyala | Apa yang terjadi |
+|---|---|---|
+| `FILL` | FILL | Ember campuran diisi dari penampungan utama. |
+| `FERT` | FERT A dan B | Dosis pupuk A dan B masuk ke ember selama durasi tetap. |
+| `SETTLE` | — | Semua pompa mati, larutan homogen sebelum dinilai. |
+| `CHECK` | — | TDS ember dinilai terhadap rentang penerimaan. |
+| `DIST` | DIST | Larutan dialirkan ke tanaman selama durasi dosis. |
+
+Dosis per siklus bukan timer tetap: dihitung dari ETc harian
 (ETc × luas media 9 000 cm² × 0,1), dibagi jumlah siklus per hari, lalu
-dijadikan durasi pompa lewat debit terukur 31,7 mL/s. Volume harian dibatasi
-anggaran ETc dan antar siklus ada jeda minimum, sehingga air yang keluar tidak
-melebihi kebutuhan tanaman. Fertigasi ditunda: pompa FILL dan FERT A/B terpasang
-tetapi tidak dijalankan firmware.
+dijadikan durasi pompa DIST lewat debit terukur 31,7 mL/s. Dosis stok A dan B
+pada fase FERT berjalan **lingkaran terbuka**: durasinya tetap, dihitung dari
+debit pompa FERT terukur 22,2 mL/s menurut resep AB Mix, bukan disesuaikan
+terhadap bacaan TDS.
+
+Karena itu TDS pada fase CHECK hanya **memverifikasi** dugaan dosis, bukan
+mengendalikannya. Bila hasilnya di luar `TDS_MIN_PPM`..`TDS_MAX_PPM`, atau
+sensornya tidak terbaca, sistem tetap melanjutkan ke `DIST` dan mengirim
+peringatan lewat field `irigasi_alasan_tahan` di RTDB beserta label ` TDSERR`
+pada status. Air yang tertahan lebih berbahaya bagi tanaman daripada larutan
+yang sedikit meleset.
+
+Volume harian dibatasi anggaran ETc dan antar siklus ada jeda minimum,
+sehingga air yang keluar tidak melebihi kebutuhan tanaman. Durasi fase `FILL`,
+`FERT`, dan `SETTLE` masih **perkiraan** dan ditandai `TODO` di `config.h`;
+nilai sebenarnya diukur dari waktu yang tercetak di log serial pada tiap
+perpindahan fase (`irigasi: fase FILL`, dst.).
 
 **Fail-safe.** Bila sensor tidak valid, keputusan fuzzy untuk irigasi tidak
 dipakai dan siklus irigasi yang sedang berjalan dibatalkan. Override manual
