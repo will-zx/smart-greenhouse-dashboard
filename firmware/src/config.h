@@ -45,13 +45,31 @@
 
 // Pompa irigasi. Prototipe sekarang memakai SATU pompa: DIST (12V) menarik
 // air langsung dari penampungan utama ke zona tanam.
-// PUMP_FILL / PUMP_FERT_A / PUMP_FERT_B TETAP ADA di sini dan tetap dipaksa
-// LOW di initActuators(): firmware TIDAK PERNAH memanggilnya (siklus FILL/FERT
-// dibuang, fertigasi ditunda). Jangan hapus definisi pinnya.
-#define PUMP_FILL          13   // 12V: penampungan utama -> ember campuran (TIDAK dipakai)
-#define PUMP_FERT_A        14   // 5V : pupuk A -> ember (TIDAK dipakai)
-#define PUMP_FERT_B        15   // 5V : pupuk B -> ember (TIDAK dipakai)
-#define PUMP_DIST          32   // 12V: penampungan utama -> tanaman (dipakai)
+// Fertigasi aktif kembali: FILL mengisi ember campuran, FERT menyalakan pompa
+// stok A dan B, DIST mengalirkan larutan yang sudah diperiksa ke tanaman.
+// Semua via modul XY-MOS/MOSFET (hormati MOSFET_INVERTED).
+#define PUMP_FILL          13   // 12V: penampungan utama -> ember campuran
+#define PUMP_FERT_A        14   // 5V : pupuk A -> ember
+#define PUMP_FERT_B        15   // 5V : pupuk B -> ember
+#define PUMP_DIST          32   // 12V: ember campuran -> tanaman
+
+// ==== Durasi tiap fase fertigasi ====
+// SEMUA ANGKA DI BAWAH INI BELUM DIUKUR. Masih perkiraan dan ditandai TODO
+// supaya tidak tertukar dengan nilai hasil kalibrasi di atas.
+// Cara ukur:
+//  1) IRRIG_FILL_MS  = volume ember (mL) / debit FILL (31,7 mL/s) x 1000.
+//  2) IRRIG_FERT_MS  = dosis yang diminta resep AB Mix / debit FERT (22,2 mL/s).
+//  3) IRRIG_SETTLE_MS = jeda sampai pembacaan TDS berhenti bergerak.
+#define IRRIG_FILL_MS      30000   // TODO: belum diukur
+#define IRRIG_FERT_MS      45000   // TODO: belum diukur
+#define IRRIG_SETTLE_MS    30000   // TODO: belum diukur
+// Jeda singkat di fase CHECK supaya pembacaan TDS stabil sebelum dinilai.
+// SETTLE sudah memberi 30 detik tanpa pompa, jadi ini hanya jeda tambahan
+// satu putaran loop controlTask (2 detik).
+#define IRRIG_CHECK_MS      2000
+// Batas waktu mutlak tiap fase supaya tidak ada pompa yang berjalan tanpa henti
+// bila sensor atau waktunya nyangkut.
+#define IRRIG_PHASE_TIMEOUT_MS 180000UL
 
 // ==== Kalibrasi dosis irigasi (TERUKUR 21 Okt 2026) ====
 // Debit pompa: gelas ukur + stopwatch, 3x, rata-rata.
@@ -60,6 +78,7 @@
 // Cara ukur ulang: letakkan gelas ukur di outlet pompa, nyalakan pompa,
 // catat volume setelah 30 s, ulangi 3x, ambil rata-rata -> mL/detik.
 #define PUMP_DIST_ML_PER_S   31.7f
+#define PUMP_FERT_ML_PER_S   22.2f
 // Luas wetted zona: 10 polybag 30x30 cm, 2 baris -> 900 cm2 per tanaman
 // (asumsi: permukaan atas polibag = area wetted), total 9000 cm2.
 // Cara ukur ulang: hitung luas dasar tiap polybag (pi * d^2 / 4 dengan d =
@@ -95,18 +114,51 @@
 // kedua saat listrik mati. Tidak ada kode khusus; dokumentasi di Laporan.
 
 // ==== Blaney-Criddle: kebutuhan air ====
-// ETo = p * (0,46 * Tmean + 8) ; ETc = Kc * ETo   (mm/hari)
+// Sumber: FAO Irrigation and Drainage Paper 24, "Crop Water Requirements",
+// bab 1.1 (hal. 3), persamaan ETo = c * [ p * (0.46T + 8) ], dan Table 1
+// "Mean Daily Percentage (p) of Annual Daytime Hours for Different Latitudes"
+// (hal. 6). Berkas: 02/FAO Crop Water Requirement.pdf.
 //
-// Faktor p = fraksi jam siang tahunan (dimensionless).
-// Rumus FAO-24: p = (N/24) * (1 + 0,033*cos(2*pi*J/365)), N = jam siang efektif.
-// Indonesia (0-7 LS) dengan N = 12 jam -> p ~ 0,48-0,50.
-// TODO: tabel p resmi FAO-24 BELUM terverifikasi (dokumen FAO-24 tidak tersedia
-// daring; FAO-56 yang daring hanya memuat Penman-Monteith & pan evaporation).
-// Angka ini berasal dari RUMUS FAO-24, bukan dari tabel resmi -> sebelum
-// dipakai di laporan harus dicek ke sumber primer.
-// Catatan: kode lama memakai p = PEAK_HOURS/12 = 0,333 (PEAK_HOURS = jam puncak
-// matahari, BUKAN jam siang) -> ETo kurang ~30 % dari rumus FAO-24.
-#define BC_P_FACTOR      0.48f
+// Cara pakai p DIVALIDASI dari contoh terbuka Kairo pada halaman yang sama:
+// lintang 30 derajat Utara bulan Juli, T = 28.5 C -> p = 0.31 -> p(0.46T+8)
+// = 6.5 mm/hari. Artinya p dipakai LANGSUNG sebagai pecahan tabel (0.31),
+// BUKAN sebagai persen (31) dan BUKAN sebagai hasil tafsir rumus (N/24).
+//
+// Nilai p tabel FAO-24 berada di kisaran 0.23-0.41 untuk lintang 0-60, dan
+// mendekati 0.27 pada lintang rendah. Angka 0.48 yang dipakai sebelumnya
+// berasal dari tafsir rumus (N/24) di atas, bukan dari tabel -> ETo melebih
+// sekitar 65 persen, dan karena ETc langsung menentukan dosis pompa,
+// kelebihan itu ikut terkirim ke tanaman.
+//
+// Faktor penyesuaian c (bergantung pada RHmin, n/N, dan angin siang) TIDAK
+// dipakai di sini (c = 1). FAO-24 meminta metode ini dipakai dengan skeptis
+// pada daerah khatulistiwa yang suhunya nyaris konstan, dan Penman-Monteith
+// (FAO-56) tetap metode standar. Hasil di sini karena itu dilabeli
+// pendekatan, bukan ETo standar.
+//
+// p per bulan untuk lintang Semarang (6 derajat 58 LS, dibulatkan 7 LS).
+// Tabel FAO-24 hanya memuat lintang 0, 5, 10, ... sehingga nilai berikut
+// DIHASILKAN DENGAN INTERPOLASI LINIER antara baris 5 dan 10, memakai
+// ketentuan catatan kaki tabel: "Southern latitudes: apply 6 month
+// difference" (bulan Selatan memakai kolom Utara yang digeser 6 bulan).
+// Baris mentah 5 LS dan 10 LS hanya berselisih 0.01, jadi galat
+// interpolasinya kecil.
+// TODO: PERIKSA ULANG ke Table 1 sebelum dikutip di laporan, karena ini
+// hasil interpolasi, bukan bacaan langsung.
+static const float SUN_P_MONTH[12] = {
+    0.284f, // Januari
+    0.280f, // Februari
+    0.280f, // Maret
+    0.270f, // April
+    0.266f, // Mei
+    0.266f, // Juni
+    0.266f, // Juli
+    0.270f, // Agustus
+    0.270f, // September
+    0.280f, // Oktober
+    0.280f, // November
+    0.284f  // Desember
+};
 // Konstanta rumus Blaney-Criddle: ETo = p * (BC_T_COEF * Tmean + BC_T_CONST).
 #define BC_T_COEF        0.46f
 #define BC_T_CONST       8.0f
@@ -144,14 +196,26 @@
 // TDS Meter v1.0 (analog, klon DFRobot SEN0244) di ember campuran irigasi.
 // Output ~0..2.3V. GPIO35 = ADC input-only tanpa pull-up. Kompensasi suhu
 // memakai suhu SHT31. Kalibrasi: TDS_CAL_K (set dengan larutan standar).
-// CATATAN: TDS sekarang hanya TELEMETRI (dashboard). Dosis pupuk memakai
-// pompa FERT yang ditunda, jadi TDS_TARGET_PPM belum dipakai menghitung
-// dosis apa pun; dipakai lagi saat fertigasi diaktifkan kembali.
+// CATATAN: TDS dipakai sebagai PEMERIKSA setelah larutan homogen, bukan
+// pengendali dosis. Dosis stok A/B berjalan selama IRRIG_FERT_MS (lingkaran
+// terbuka) menurut debit pompa yang sudah terukur, sehingga konsentrasi
+// diharapkan jatuh di dalam rentang. TDS memverifikasi dugaan itu.
+//
+// PERILAKU SAAT DI LUAR RENTANG: distribusi TETAP dijalankan dan hanya
+// diberi PERINGATAN (holdReason + status di dashboard). Alasannya, air yang
+// tertahan lebih berbahaya bagi tanaman daripada larutan yang sedikit meleset.
+// Kalau kelak mau ditahan sungguhan, ubah tdsDitolak() di irrigation.cpp.
 #define TDS_PIN         35
 #define TDS_ADC_MAX     4095.0
 #define TDS_REF_VOLT    3.3
 #define TDS_TARGET_PPM  1000.0  // konsentrasi larutan akhir (air penampungan ~400 ppm)
 #define TDS_CAL_K       1.0
+// Rentang penerimaan larutan sebelum distribusi.
+// TODO: perkiraan belaka. Tetapkan dari resep AB Mix yang benar-benar dipakai:
+//   ppm_target = dosis stok (mL) / volume ember (mL) x konsentrasi stok (ppm)
+// Lalu ukur dengan larutan standar dan sesuaikan TDS_CAL_K.
+#define TDS_MIN_PPM     800.0f
+#define TDS_MAX_PPM    1200.0f
 // Rentang raw ADC yang dianggap sah (probe terendam, bukan mengambang / dicabut)
 // dan rentang ppm. Di luar itu TDS ditandai tidak valid -> dosis pupuk tidak
 // dihitung dari angka garbage.
