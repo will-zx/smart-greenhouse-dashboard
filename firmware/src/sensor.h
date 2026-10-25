@@ -12,6 +12,12 @@ struct SensorData {
     float soilRaw[SOIL_COUNT];     // ADC mentah per probe (untuk kalibrasi)
     bool  valid;        // SHT31 (mikroklimat) terbaca & masuk rentang
     bool  soilValid;    // minimal satu probe tanah dalam rentang raw yang masuk akal
+    // Status per probe. soilPct[]/soilRaw[] berisi NAN saat probe gagal, dan
+    // field itu dibuang dari JSON (putNum) — jadi dashboard tidak bisa
+    // membedakan "probe tercabut" dari "record firmware lama". Dua angka ini
+    // dikirim eksplisit supaya bedanya jelas.
+    uint8_t soilOk;     // bitmask probe valid: bit0=SOIL_PINS[0], bit1=..[1], dst
+    uint8_t soilCount;  // jumlah probe valid (0..SOIL_COUNT)
 };
 
 void initSensor();

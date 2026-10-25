@@ -52,18 +52,28 @@ void controlRelease() {
     Serial.println("[ctl] auto: semua aktuator kembali ke kendali fuzzy");
 }
 
-void controlSet(uint8_t bit, bool on) {
+void controlForce(uint8_t bit, int8_t mode) {
+    if (mode < -1) mode = -1;
+    if (mode > 1)  mode = 1;
     lock();
-    // Sakelar dimatikan = aktuator itu kembali ke fuzzy, BUKAN dipaksa mati
-    // dan bukan ikut memadamkan aktuator lain.
-    int8_t v = on ? 1 : -1;
+    // Mode 0 (paksa mati) WAJIB distempel juga: expireManual() memakai
+    // selisih millis() - tX, jadi stempel 0 membuat override mati tidak pernah
+    // kedaluwarsa (sekaligus menghindari wrap-up di awal boot).
+    unsigned long stamp = (mode == -1) ? 0 : millis();
     const char* nama = "";
-    if (bit & C_MIST)   { ovMist = v; tMist = on ? millis() : 0; nama = "misting"; }
-    if (bit & C_IRIG)   { ovIrig = v; tIrig = on ? millis() : 0; nama = "irigasi"; }
-    if (bit & C_BLOWER) { ovBlower = v; tBlower = on ? millis() : 0; nama = "blower"; }
+    if (bit & C_MIST)   { ovMist = mode; tMist = stamp; nama = "misting"; }
+    if (bit & C_IRIG)   { ovIrig = mode; tIrig = stamp; nama = "irigasi"; }
+    if (bit & C_BLOWER) { ovBlower = mode; tBlower = stamp; nama = "blower"; }
     unlock();
     Serial.printf("[ctl] override %s -> %s\n", nama,
-                  on ? "paksa nyala" : "kembali ke fuzzy");
+                  mode == 1 ? "paksa nyala"
+                            : (mode == 0 ? "paksa mati" : "kembali ke fuzzy"));
+}
+
+void controlSet(uint8_t bit, bool on) {
+    // Sakelar dimatikan = aktuator itu kembali ke fuzzy, BUKAN dipaksa mati
+    // dan bukan ikut memadamkan aktuator lain.
+    controlForce(bit, on ? 1 : -1);
 }
 
 void controlApply(bool* mist, bool* irigasi, bool* blower, float* blowerLevel) {

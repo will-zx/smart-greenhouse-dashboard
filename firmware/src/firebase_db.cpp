@@ -2,6 +2,7 @@
 #include "config.h"
 #include "control.h"
 #include "phase.h"
+#include "irrigation.h"   // irrigationAbort(): mode "off" pada irigasi
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -23,6 +24,14 @@ static HTTPClient http;
 //   soil2, soil3     %       probe tanah ke-2 dan ke-3 (SOIL_PINS) untuk
 //                            melihat pot yang mengering lebih dulu; tidak
 //                            dipakai keputusan fuzzy
+//   soil_ok          int     bitmask probe tanah yang VALID: bit0 = probe 1,
+//                            bit1 = probe 2, bit2 = probe 3 (sesuai SOIL_PINS)
+//   soil_n           int     jumlah probe valid (0..SOIL_COUNT)
+//                            soil_ok/soil_n selalu dikirim, termasuk saat
+//                            semua probe mati — soil2/soil3 hilang dari JSON
+//                            karena NaN dibuang, jadi tanpa dua field ini
+//                            dashboard tidak bisa membedakan "probe tercabut"
+//                            dari "record firmware lama"
 //   vpd              kPa     defisit tekanan uap (Tetens, dari T & RH)
 //   etc              mm/hari kebutuhan air tanaman (Blaney-Criddle x Kc fase)
 //   et0              mm/hari ALIAS LAMA dari "etc" (deprecated, hapus nanti)
@@ -55,6 +64,30 @@ static HTTPClient http;
 //   time_synced       bool    jam perangkat sudah sinkron NTP
 //   ts                s       epoch waktu pengiriman (hanya bila sinkron)
 //   device            string  id unit
+//
+// ==== Kontrak perintah (/commands/{DEVICE_ID}) ====
+// Satu objek per perintah; device mengeksekusi yang paling lama lalu menandainya
+// selesai (lihat pollCommands()). Field:
+//
+//   action   string  mist | irigasi | blower | auto | restart |
+//                    set_vpd | set_fase | set_durasi | fase_reset
+//   value    bool    KHUSUS aksi aktuator tanpa "mode": true = paksa nyala,
+//                    false = kembali ke fuzzy (perilaku lama, dipertahankan)
+//   mode     string  opsional, MENANG atas "value" bila keduanya ada:
+//                      "on"   = paksa nyala (ov = 1)
+//                      "off"  = paksa mati  (ov = 0)
+//                      "auto" = kembali ke fuzzy (ov = -1)
+//                    Mode "on"/"off" berlaku 10 menit lalu kembali ke fuzzy
+//                    (MANUAL_MAX_MS). Mode "off" untuk irigasi juga
+//                    membatalkan siklus yang sedang berjalan (pompa berhenti).
+//
+//   Contoh:
+//     {"action":"blower","value":true}            -> paksa nyala (cara lama)
+//     {"action":"blower","mode":"on"}             -> sama, eksplisit
+//     {"action":"blower","mode":"off"}            -> blower dipaksa mati
+//     {"action":"mist","mode":"auto"}             -> misting ikut fuzzy lagi
+//     {"action":"irigasi","mode":"off"}           -> siklus dibatalkan + pompa mati
+//     {"action":"set_fase","value":"Generatif"}
 //
 // ==== TLS (P2-12) — MASIH PROTOTYPING ====
 // Semua koneksi memakai client.setInsecure() -> verifikasi CA dimatikan.
@@ -209,6 +242,7 @@ static const char* ovName(int8_t ov) {
 }
 
 bool pushSensorLog(float temperature, float humidity, float soil, float soil2, float soil3,
+                   uint8_t soilOk, uint8_t soilCount,
                    float vpd, float etc, float tds,
                    float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
@@ -228,6 +262,9 @@ bool pushSensorLog(float temperature, float humidity, float soil, float soil2, f
     putNum(doc, "soil", soil);
     putNum(doc, "soil2", soil2);
     putNum(doc, "soil3", soil3);
+    // Status per-probe eksplisit: 0/0 = semua probe mati, bukan record lama.
+    doc["soil_ok"] = (int)soilOk;
+    doc["soil_n"] = (int)soilCount;
     putNum(doc, "vpd", vpd);
     // "etc" = nama final (isi = ETc, sudah x Kc). "et0" disimpan sebagai
     // alias lama supaya dashboard yang belum migrate tidak ikut rusak;
@@ -283,6 +320,13 @@ bool pushSensorLog(float temperature, float humidity, float soil, float soil2, f
 bool httpPostSensorLogs(const String& body) {
     if (WiFi.status() != WL_CONNECTED) return false;
     return httpPost(LOGS_PATH, body);
+}
+
+// Terapkan perintah aktuator dari dashboard.
+// mode: -2 = field "mode" tidak ada -> pakai "value" boolean seperti cara lama,
+//       selain itu 0/1/-1 = paksa mati / paksa nyala / kembali ke fuzzy.
+static void applyActuator(uint8_t bit, int8_t mode, bool on) {
+    controlForce(bit, (mode == -2) ? (on ? 1 : -1) : mode);
 }
 
 void pollCommands() {
@@ -344,14 +388,28 @@ void pollCommands() {
     bool on = value | false;
     bool isRestart = strcmp(action, "restart") == 0;
 
+    // Field "mode" (opsional) menang atas "value". -2 = tidak ada mode, jadi
+    // perintah lama tetap berjalan persis seperti sebelumnya.
+    const char* modeStr = target["mode"] | "";
+    int8_t mode = -2;
+    if (strcmp(modeStr, "on") == 0)        mode = 1;
+    else if (strcmp(modeStr, "off") == 0)  mode = 0;
+    else if (strcmp(modeStr, "auto") == 0) mode = -1;
+    else if (modeStr[0] != '\0') {
+        Serial.printf("[fb] mode tidak dikenal: %s (pakai on/off/auto)\n", modeStr);
+    }
+
     if (strcmp(action, "auto") == 0) {
         controlRelease();
     } else if (strcmp(action, "mist") == 0) {
-        controlSet(C_MIST, on);
+        applyActuator(C_MIST, mode, on);
     } else if (strcmp(action, "irigasi") == 0) {
-        controlSet(C_IRIG, on);
+        applyActuator(C_IRIG, mode, on);
+        // Mode "off" harus benar-benar menghentikan pompa: tanpa abort, state
+        // machine (FILL/FERT/DIST) terus memutar pompa walau sakelar OFF.
+        if (mode == 0) irrigationAbort();
     } else if (strcmp(action, "blower") == 0) {
-        controlSet(C_BLOWER, on);
+        applyActuator(C_BLOWER, mode, on);
     } else if (strcmp(action, "set_vpd") == 0) {
         // value = VPD target (kPa). Contoh: {"action":"set_vpd","value":1.2}
         // Hanya rentang hortikultura yang diterima; target 10 kPa membuat
@@ -402,10 +460,11 @@ void pollCommands() {
     } else if (!isRestart) {
         Serial.printf("[fb] perintah tidak dikenal: %s\n", action);
     }
-    // Log ringkas hanya untuk perintah boolean (set_* sudah mencetak sendiri).
+    // Log ringkas hanya untuk perintah aktuator (set_* sudah mencetak sendiri).
     if (strcmp(action, "auto") == 0 || strcmp(action, "mist") == 0 ||
         strcmp(action, "irigasi") == 0 || strcmp(action, "blower") == 0) {
-        Serial.printf("[fb] perintah diterima: %s %d\n", action, on);
+        const char* modeLog = (mode == 1) ? "on" : (mode == 0 ? "off" : "auto");
+        Serial.printf("[fb] perintah diterima: %s %s\n", action, modeLog);
     }
 
     // Tandai selesai dengan menghapus entri. WAJIB sebelum restart — kalau tidak,

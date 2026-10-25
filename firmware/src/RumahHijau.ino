@@ -35,6 +35,8 @@ struct Snapshot {
     bool  manual, mist, blower, irigasiRunning;
     float blowerLevel;  // 0..1, tingkat blower yang benar-benar dijalankan (PWM)
     char  status[96];   // label aksi (buildStatus) + penanda SOILERR/TDSERR/...
+    uint8_t soilOk;     // bitmask probe tanah valid (0 = semua mati)
+    uint8_t soilCount;  // jumlah probe tanah valid
     PhaseState phase;   // setelan fase + VPD target (untuk telemetri DB)
     OverrideState ov;   // status override manual per aktuator (sakelar dashboard)
     IrrigStatus irig;   // dosis/durasi/anggaran irigasi (telemetri DB)
@@ -155,6 +157,9 @@ static void controlTask(void* arg) {
     bool alertActive = false;
     unsigned long lastFailPrint = 0;
     unsigned long lastGatePrint = 0;
+    // Bitmask probe iterasi sebelumnya. 0xFF = belum pernah, supaya baris
+    // status probe pertama tetap tercetak setelah boot.
+    uint8_t lastSoilOk = 0xFF;
     TickType_t lastWake = xTaskGetTickCount();
 
     // Fail-safe I2C nyangkut: subscribe controlTask ke Task WDT. WDT di-init
@@ -203,6 +208,35 @@ static void controlTask(void* arg) {
             // Belum pernah ada sampel sah: pakai kondisi NETRAL (50 %), bukan
             // 0 % kering palsu (bikin fuzzy tambah misting tanpa alasan).
             sensorData.soilMoisture = (lastN > 0) ? (lastSum / (float)lastN) : 50.0f;
+        }
+
+        // Jejak perubahan status probe. Dicetak HANYA saat bitmask berubah
+        // (bukan tiap 2 s) supaya serial tidak banjir, tapi operator tetap tahu
+        // kapan probe tercabut / tersambung lagi — kejadian yang di dashboard
+        // hanya terlihat sebagai hilangnya soil2/soil3.
+        if (sensorData.soilOk != lastSoilOk) {
+            lastSoilOk = sensorData.soilOk;
+            char okList[24] = "";
+            char badList[80] = "";
+            for (uint8_t ch = 0; ch < SOIL_COUNT; ch++) {
+                char item[24];
+                if (sensorData.soilOk & (uint8_t)(1u << ch)) {
+                    snprintf(item, sizeof(item), "%s%u", okList[0] ? "," : "", ch + 1);
+                    strncat(okList, item, sizeof(okList) - strlen(okList) - 1);
+                } else {
+                    snprintf(item, sizeof(item), "%s%u (raw %.0f)",
+                             badList[0] ? ", " : "", ch + 1, sensorData.soilRaw[ch]);
+                    strncat(badList, item, sizeof(badList) - strlen(badList) - 1);
+                }
+            }
+            if (!sensorData.soilOk) {
+                Serial.printf("[soil] semua probe tidak terbaca: %s\n", badList);
+            } else if (!badList[0]) {
+                Serial.printf("[soil] semua probe OK (%s)\n", okList);
+            } else {
+                Serial.printf("[soil] probe %s OK · probe %s tidak terbaca\n",
+                              okList, badList);
+            }
         }
 
         // TDS dipakai sebagai PEMERIKSA di fase CHECK: dosis stok A/B jalan
@@ -319,6 +353,13 @@ static void controlTask(void* arg) {
         // manual per aktuator, jadi mematikan sakelar berarti kembali ke fuzzy.
         if (!sensorData.valid) {
             irrigationAbort();
+        } else if (ov.irig == 0) {
+            // "Paksa mati" dari dashboard (mode off): siklus yang sedang
+            // berjalan harus benar-benar berhenti, bukan cuma dicegah memulai
+            // yang baru. Diperiksa TIAP iterasi supaya abort yang dikirim
+            // netTask tidak bisa dilanjutkan lagi oleh state machine di
+            // iterasi berikutnya.
+            irrigationAbort();
         } else {
             // manual = override operator memaksa irigasi nyala (ov.irig == 1).
             // Perintah eksplisit itu boleh menembus jeda & anggaran harian,
@@ -394,6 +435,8 @@ static void controlTask(void* arg) {
         s.soilMoisture = rSoil;
         s.soil2 = rSoil2;
         s.soil3 = rSoil3;
+        s.soilOk = sensorData.soilOk;
+        s.soilCount = sensorData.soilCount;
         s.vpd = rVpd;
         s.etc = rEtc;
         s.tds = rTds;
@@ -463,7 +506,7 @@ static void netTask(void* arg) {
                 lastPush = now;
                 String body;
                 bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
-                                        s.soil2, s.soil3,
+                                        s.soil2, s.soil3, s.soilOk, s.soilCount,
                                         s.vpd, s.etc, s.tds, s.blowerLevel, s.mist,
                                         s.irigasiRunning, s.status, s.manual, s.phase,
                                         s.ov, s.tmean, s.irig, &body);

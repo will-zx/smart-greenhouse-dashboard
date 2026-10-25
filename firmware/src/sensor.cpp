@@ -81,19 +81,23 @@ SensorData readSensors() {
     // Tiga probe dibaca bergantian. Keputusan irigasi memakai RATA-RATA probe
     // yang valid, sedangkan tiap probe tetap dilaporkan (soil2/soil3) supaya
     // pot/polybag yang mengering lebih dulu kelihatan di dashboard.
-    float sum = 0.0f;
-    int   n = 0;
+    float   sum = 0.0f;
+    uint8_t n = 0;
+    uint8_t okMask = 0;
     for (uint8_t ch = 0; ch < SOIL_COUNT; ch++) {
         float raw = readSoilRaw(ch);
         float pct = NAN;
         data.soilRaw[ch] = raw;
         if (soilPercent(ch, raw, &pct)) {
             sum += pct;
+            okMask |= (uint8_t)(1u << ch);   // bit per kanal, urut SOIL_PINS
             n++;
         }
         data.soilPct[ch] = pct;
         if (ch + 1 < SOIL_COUNT) delay(SOIL_SETTLE_MS);
     }
+    data.soilOk = okMask;
+    data.soilCount = n;
     data.soilValid = (n > 0);
     data.soilMoisture = (n > 0) ? (sum / (float)n) : 0.0f;
 
