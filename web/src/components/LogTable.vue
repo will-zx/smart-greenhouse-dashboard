@@ -1,5 +1,5 @@
 <script setup>
-import { state, filteredLogs, matchedLogs, fmtLogTime, fmtNum, saneSoil, pillClass, refreshWithSpin, zoneName, exportCsv } from '../store.js';
+import { state, filteredLogs, matchedLogs, fmtLogTime, fmtNum, pillClass, refreshWithSpin, zoneName, exportCsv } from '../store.js';
 
 // Batas baris yang DITAMPILKAN. Tidak fetch ulang: jendela data sudah berada
 // di memori (mis. 180 record untuk grafik 1 jam), dipotong di sisi klien.
@@ -84,7 +84,7 @@ const warnPill = 'pill pill-warn';
               </td>
               <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(log.temperature) }}</td>
               <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(log.humidity) }}</td>
-              <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(saneSoil(log.soil), 0) }}</td>
+              <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(log.soil, 0) }}</td>
               <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(log.vpd) }}</td>
               <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(log.etc) }}</td>
               <td class="whitespace-nowrap border-b border-border px-3.5 py-2.5 font-semibold text-ink max-[420px]:px-2.5">{{ fmtNum(log.tds, 0) }}</td>

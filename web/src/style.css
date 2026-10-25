@@ -14,15 +14,21 @@
   --color-accent-dark: #0d47a1;
   --color-accent-light: #90caf9;
   --color-accent-soft: #e3f2fd;
-  --color-ok: #388e3c;
+  /* Hijau "segar": #388e3c hanya 4,12:1 terhadap putih — di bawah WCAG AA
+     untuk teks normal, baik sebagai teks hijau di atas kartu putih maupun
+     sebagai latar pill berteks putih. Digelapkan sedikit -> 5,13:1. */
+  --color-ok: #2e7d32;
   --color-danger: #e53935;
   --color-danger-soft: #fef2f2;
-  --color-warn: #b26a00;
+  /* Nilai lama #b26a00 hanya 3,99:1 di atas warn-soft #fff8e1 -> gagal WCAG AA
+     untuk teks normal (.pill-warn, banner peringatan, hint "2/3 probe").
+     #8a5200 -> 6,01:1. */
+  --color-warn: #8a5200;
   --color-warn-soft: #fff8e1;
+  /* Garis tepi chip peringatan ringan (pill "data lama" di topbar). */
+  --color-warn-line: #ffe082;
   --color-track: #bbdefb;
 
-  /* Status koneksi unit di topbar (dari .zone-btn.is-ok/.is-stale/.is-off) */
-  --color-stale: #e8e91b;
   --color-off: #d5372f;
 
   /* Breakpoint lama (900/700/420) dipertahankan supaya proporsi kartu
@@ -54,7 +60,7 @@
   }
   /* Gangguan sensor (SOILERR/TDSERR) vs jam belum sinkron (NOSYNC).
      Keduanya beda dari "gagal baca" (offline, merah di topbar) dan dari
-     "data lama" (kuning di topbar). */
+     "data lama" (krem di topbar). */
   .pill-err {
     @apply ml-1 bg-danger-soft text-danger;
   }

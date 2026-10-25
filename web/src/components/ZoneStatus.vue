@@ -4,18 +4,38 @@ import { state, humanAge, zoneId } from '../store.js';
 
 // Pill unit menampilkan UMUR DATA, bukan nama unit: di topbar sempit (360px)
 // yang penting adalah kesegaran data, sedangkan nama unit sudah ada di judul
-// kartu dan di popup daftar. Warna: hijau = segar, kuning = basi < 1 hari,
-// merah = basi > 1 hari atau gagal membaca.
+// kartu dan di popup daftar.
 //
 // Record tanpa field ts (jam perangkat belum sinkron) punya warna sendiri:
 // TIDAK boleh hijau (seolah-olah segar) dan tidak boleh "NaN menit" —
 // pork: perangkat hidup, tapi jamnya belum sinkron.
+//
+// Warna teks HANYA ditentukan per status: kalau kelas dasar tombol juga
+// membawa `text-white`, dua utility warna teks bertabrakan di elemen yang sama
+// dan pemenangnya ditentukan urutan di CSS hasil build — bukan urutan class.
+//
+// Hover TIDAK boleh memakai latar beralfa (putih/hitam transparan): pill ini
+// duduk di atas topbar biru, dan lapisan transparan tembus ke induk sehingga
+// latarnya berubah jadi biru — teks krem di atas biru praktis hilang (1,03:1).
+// Hover sekarang satu aturan di kelas dasar tombol: filter brightness-95, yang
+// meredupkan warna pill itu sendiri tanpa mencampurnya dengan apa pun di
+// belakangnya. `transition` (bukan transition-colors) supaya filter ikut
+// beranimasi.
+const OLD = 'bg-warn-soft text-warn border-warn-line';
+const DARK = 'bg-off text-white border-white/30';
+
+// Tiga tingkat kesegaran data, memakai token yang sama dengan .pill-warn di
+// tabel log (krem = peringatan ringan, bukan kuning menyala yang bertabrakan
+// dengan biru topbar):
+//   segar (<=60 s)          hijau  bg-ok / teks putih
+//   data lama (>60 s)       krem   bg-warn-soft / teks warn, tepi warn-line
+//   gagal baca / >1 hari    merah  bg-off / teks putih
 const cls = computed(() => {
-  if (!state.online) return 'bg-off text-white border-transparent';
-  if (state.age === null) return 'bg-stale text-[#1f1f00] border-transparent';
-  if (state.age > 86400) return 'bg-off text-white border-transparent';
-  if (state.age > 60) return 'bg-stale text-[#1f1f00] border-transparent';
-  return 'bg-ok text-white border-transparent';
+  if (!state.online) return DARK;
+  if (state.age === null) return OLD;
+  if (state.age > 86400) return DARK;
+  if (state.age > 60) return OLD;
+  return 'bg-ok text-white border-white/30';
 });
 
 const label = computed(() => {
@@ -40,7 +60,7 @@ const ket = computed(() => {
   <div class="relative flex min-w-0 flex-1">
     <button
       type="button"
-      class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-lg border border-white/30 px-2.5 py-1.5 text-[13px] font-semibold text-white transition-colors hover:bg-white/10 max-[420px]:pr-1.5"
+      class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-lg border px-2.5 py-1.5 text-[13px] font-semibold transition hover:brightness-95 max-[420px]:pr-1.5"
       :class="cls"
       :title="ket"
       :aria-label="ket"

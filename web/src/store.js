@@ -14,9 +14,9 @@ const _zones = ZONES;
 export { _zones as ZONES };
 
 // -------------------------------------------------- rentang waktu grafik ---
-// Jendela waktu dua kartu grafik (iklim & air). limit = record yang di-fetch
-// dari RTDB (perangkat push tiap ~20 s), bucket = lebar grup down-sample
-// (detik), pollMs = interval polling. Rentang panjang dipoll lebih jarang:
+// Jendela waktu kartu grafik tren. limit = record yang di-fetch dari RTDB
+// (perangkat push tiap ~20 s), bucket = lebar grup down-sample (detik),
+// pollMs = interval polling. Rentang panjang dipoll lebih jarang:
 // 24 jam = 4320 record ~2.6 MB sekali fetch, jadi 15 menit sekali — ditambah
 // polling yang berhenti saat tab tidak terlihat, kuota Spark tetap aman.
 export const TREND_RANGE = {
@@ -40,7 +40,7 @@ export const state = reactive({
   // Jendela fetch grafik = lebar rentang terpanjang (24 jam: 4320 record).
   // Jumlah entri yang DITAMPILKAN tabel log dibedakan lewat logRows di bawah.
   logLimit: TREND_RANGE['24j'].limit,
-  // Rentang waktu grafik — dua kartu grafik (iklim & air) memakai state ini.
+  // Rentang waktu grafik tren — dipakai kartu grafik (dan jendela fetch).
   trendRange: '24j',
   // Batas baris tabel log yang DITAMPILKAN (sisi klien, masih di dalam
   // jendela fetch), bukan lagi pemicu fetch — select "Show entries" tidak
@@ -84,10 +84,9 @@ export const fmtMl = v => {
   return v >= 1000 ? (v / 1000).toFixed(1) + ' L' : Math.round(v) + ' mL';
 };
 
-// Soil moisture = 0..100%. Sensor capacitive yang belum terpasang (pin
-// menggantung) dibaca ADC tinggi -> ~100% palsu. Nilai di luar 5..95% tidak
-// ditampilkan sebagai angka.
-export const saneSoil = v => (typeof v === 'number' && v > 5 && v < 95) ? v : null;
+// Soil moisture = 0..100%, sudah di-clamp firmware. Tidak ada penyaringan di
+// sisi klien: nilai di luar jangkauan (mis. probe belum terpasang) lebih baik
+// terlihat apa adanya daripada disembunyikan diam-diam.
 
 export function fmtClock(ts) {
   if (typeof ts !== 'number' || ts < 100000) return '?';
@@ -176,13 +175,27 @@ function overrideState(l, field, running) {
 
 export function normLog(l, key) {
   const src = l || {};
-  const status = typeof src.status_sistem === 'string' ? src.status_sistem : '';
+  // status_sistem mentah = label aksi + sufiks penanda, mis.
+  // "Misting + Blower ON TDSERR NOSYNC". Penanda tetap dibaca jadi flag (pill
+  // terpisah + ekspor CSV), tapi TIDAK ikut di label — kalau ikut, penanda
+  // muncul dua kali dan kolom status jadi panjang.
+  const statusRaw = typeof src.status_sistem === 'string' ? src.status_sistem : '';
+  const clean = statusRaw.replace(/\s*\b(SOILERR|TDSERR|NOSYNC|IRRIGOFF)\b/g, '').trim();
+  const status = clean || null;
   const hasTs = typeof src.ts === 'number' && src.ts >= 100000;
   // time_synced hanya ada di firmware baru; di firmware lama absen = dianggap
   // sinkron bila ts ada.
   const synced = hasTs && src.time_synced !== false;
   const level = numOrNull(src.blower_level);
   const etc = numOrNull(src.etc !== undefined && src.etc !== null ? src.etc : src.et0);
+  const soil2 = numOrNull(src.soil2);
+  const soil3 = numOrNull(src.soil3);
+  const soil = numOrNull(src.soil);
+  // Status probe tanah: soil_ok = bitmask probe valid, soil_n = jumlah probe
+  // valid (0..3). Firmware lama tidak mengirimnya -> dihitung dari field mana
+  // yang benar-benar ada, supaya kartu tidak menampilkan "0/3" palsu.
+  const soilN = numOrNull(src.soil_n) ??
+    [soil, soil2, soil3].filter(v => v !== null).length;
 
   const row = {
     _key: key,
@@ -191,29 +204,33 @@ export function normLog(l, key) {
     device: typeof src.device === 'string' ? src.device : '',
     temperature: numOrNull(src.temperature),
     humidity: numOrNull(src.humidity),
-    soil: numOrNull(src.soil),
-    soil2: numOrNull(src.soil2),
-    soil3: numOrNull(src.soil3),
+    soil,
+    soil2,
+    soil3,
+    soilOk: numOrNull(src.soil_ok),
+    soilN,
     vpd: numOrNull(src.vpd),
     etc,
     tds: numOrNull(src.tds),
     blowerLevel: level,
     // Status aktuator SESUNGGUHNYA (yang sedang berjalan) — terpisah dari
     // override. Sakelar memakai override, operator perlu tahu yang berjalan.
-    misting: typeof src.misting === 'boolean' ? src.misting : status.includes('MISTING'),
-    irigasi: typeof src.irigasi === 'boolean' ? src.irigasi : status.includes('IRIGASI'),
-    blower: level !== null ? level > 0 : status.includes('BLOWER'),
-    status,
+    // Fallback teks memakai string MENTAH (artinya tidak berubah).
+    misting: typeof src.misting === 'boolean' ? src.misting : statusRaw.includes('MISTING'),
+    irigasi: typeof src.irigasi === 'boolean' ? src.irigasi : statusRaw.includes('IRIGASI'),
+    blower: level !== null ? level > 0 : statusRaw.includes('BLOWER'),
+    status,          // label bersih (null bila hanya berisi penanda)
+    statusRaw,       // string mentah: pencarian & ekspor CSV
     manual: src.manual_mode === true,
     flags: {
-      sensorError: /sensor error/i.test(status),
-      soilErr: status.includes('SOILERR'),
-      tdsErr: status.includes('TDSERR'),
-      noSync: status.includes('NOSYNC') || !synced,
+      sensorError: /sensor error/i.test(statusRaw),
+      soilErr: statusRaw.includes('SOILERR'),
+      tdsErr: statusRaw.includes('TDSERR'),
+      noSync: statusRaw.includes('NOSYNC') || !synced,
       // IRRIGOFF = perangkat SENGAJA menonaktifkan irigasi otomatis (mis. debit
       // pompa & luas media belum dikalibrasi), BUKAN gangguan. Perintah
       // manual tetap jalan.
-      irrigOff: status.includes('IRRIGOFF'),
+      irrigOff: statusRaw.includes('IRRIGOFF'),
     },
     phase: {
       name: typeof src.fase === 'string' ? src.fase : null,
@@ -337,25 +354,22 @@ export async function fetchDataLogs() {
 }
 
 // ----------------------------------------------- data grafik (down-sample) ---
-// Down-sample untuk grafik: dirata-ratakan per bucket (60 s / 300 s). Ditaruh
-// di store, bukan di komponen, supaya kedua kartu grafik menampilkan data
-// yang sama persis. null tidak ikut dirata-rata — rata-rata tetap null ->
-// Chart.js menggambar celah, bukan 0 palsu.
-const FLAT_FIELDS = ['temperature', 'humidity', 'vpd', 'etc', 'vpdTarget', 'budgetMl', 'soil2', 'soil3'];
+// Down-sample untuk grafik: dirata-ratakan per bucket (5 mnt / 10 mnt). Ditaruh
+// di store, bukan di komponen, supaya jendela fetch dan titik grafik selalu
+// sinkron. null tidak ikut dirata-rata — rata-rata tetap null -> Chart.js
+// menggambar celah, bukan 0 palsu.
+const FLAT_FIELDS = ['temperature', 'humidity', 'vpd', 'etc'];
 
 // Field trendData dipetakan flat dari baris normLog (grafik cuma butuh angka).
+// Target VPD tidak dipetakan: kartu Fase & Setpoint VPD yang menampilkannya,
+// grafik tren hanya menggambar hasil ukur.
 function flatRow(r) {
   return {
     ts: r.ts,
     temperature: r.temperature,
     humidity: r.humidity,
     vpd: r.vpd,
-    soil2: r.soil2,
-    soil3: r.soil3,
     etc: r.etc,
-    vpdTarget: r.phase.target,
-    budgetMl: r.irigasiInfo.budgetMl,
-    usedMl: r.irigasiInfo.usedMl,
   };
 }
 
@@ -366,13 +380,6 @@ const avgOf = (rows, k) => {
     if (typeof v === 'number' && isFinite(v)) { s += v; n++; }
   }
   return n ? s / n : null;
-};
-const lastOf = (rows, k) => {
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const v = rows[i][k];
-    if (typeof v === 'number' && isFinite(v)) return v;
-  }
-  return null;
 };
 
 export const trendData = computed(() => {
@@ -392,9 +399,6 @@ export const trendData = computed(() => {
   for (const [slot, rows] of groups) {
     const g = { ts: slot * bucket };
     for (const k of FLAT_FIELDS) g[k] = avgOf(rows, k);
-    // Kumulatif tidak boleh dirata-rata: tiga titik 20 s berisi 0/0/3764 kalau
-    // dirata-rata jadi 1255 — yang benar nilai TERAKHIR 3764.
-    g.usedMl = lastOf(rows, 'usedMl');
     out.push(g);
   }
   for (const r of state.logData) if (r.ts === null) out.push(flatRow(r));
@@ -449,24 +453,29 @@ export function setTrendRange(r) {
 // Nama aktuator -> label Indonesia (dipakai di pesan).
 const ACT_NAMES = { mist: 'Misting', irigasi: 'Irigasi', blower: 'Blower' };
 
-// Status override yang tampil: dari perangkat, ditambah efek optimistis selama
-// perintah masih menunggu konfirmasi. Optimistik HANYA boleh mengubah tampilan
-// OVERRIDE — status aktuator (ON/OFF) selalu dari perangkat, supaya dashboard
-// tidak pernah mengarang apa yang sedang berjalan.
-export const overrideStates = computed(() => {
-  const base = state.lastData
-    ? state.lastData.override
-    : { mist: 'auto', irigasi: 'auto', blower: 'auto' };
-  const eff = { ...base };
+// Status override yang tampil: HANYA dari record perangkat, tanpa tebakan.
+// Sebelum perangkat melapor, menebak "paksa nyala/mati" menghasilkan baris yang
+// bertentangan sendiri ("Paksa mati · status MENYALA"). Umpan balik klik
+// diberikan oleh posisi knob (switchOn); teks di bawah kartu sudah menyatakan
+// "perintah terkirim — menunggu konfirmasi".
+export const overrideStates = computed(() => state.lastData
+  ? { ...state.lastData.override }
+  : { mist: 'auto', irigasi: 'auto', blower: 'auto' });
+
+// Posisi knob sakelar = kehendak operator. Default: keadaan yang dilaporkan
+// perangkat; selama perintah masih pending, knob menampilkan mode yang dikirim
+// supaya klik langsung terlihat. Pending hilang sendiri saat cmdConfirmed()
+// true atau timeout, jadi knob kembali ke record tanpa kode tambahan.
+export const switchOn = computed(() => {
+  const d = state.lastData;
+  const on = {
+    mist: d?.misting === true,
+    irigasi: d?.irigasi === true,
+    blower: d?.blower === true,
+  };
   const p = state.pending;
-  if (p) {
-    if (p.action === 'auto') {
-      eff.mist = 'auto'; eff.irigasi = 'auto'; eff.blower = 'auto';
-    } else if (p.action in eff) {
-      eff[p.action] = p.value ? 'on' : 'auto';
-    }
-  }
-  return eff;
+  if (p && p.action in on) on[p.action] = p.mode ? p.mode === 'on' : !!p.value;
+  return on;
 });
 
 // Ringkasan override manual: aktuator mana yang sedang di-override.
@@ -481,9 +490,9 @@ export const manualInfo = computed(() => {
   return { items, unknown, any: items.length > 0 || unknown };
 });
 
-// Sumber kebenaran posisi sakelar: status OVERRIDE per aktuator (bukan status
-// aktuator). Log lama (sebelum field override dikirim) jatuh ke heuristik
-// manual_mode.
+// Keadaan aktuator yang DILAPORKAN perangkat (misting/irigasi/blower). Ini yang
+// jadi angka/label ON-OFF; override (paksa nyala/mati) hanya ditampilkan lewat
+// baris teks mode, supaya status tidak pernah berbohong soal apa yang berjalan.
 export const actuators = computed(() => {
   const d = state.lastData;
   const ov = overrideStates.value;
@@ -506,16 +515,20 @@ export const actuators = computed(() => {
 export const matchedLogs = computed(() => {
   const f = state.logFilter;
   if (!f) return state.logData;
-  return state.logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.status || '')).toLowerCase().includes(f));
+  return state.logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.statusRaw || '')).toLowerCase().includes(f));
 });
 
 // Tabel hanya menampilkan logRows baris terakhir dari jendela fetch
 // (180/1080 record untuk grafik) supaya tidak memanjang tak terkendali.
 export const filteredLogs = computed(() => matchedLogs.value.slice(-state.logRows));
 
-// Badge status aktif mengikuti isi teksnya, bukan warnanya.
-export const pillClass = s =>
-  (s.includes("MISTING") || s.includes("BLOWER") || s.includes("IRIGASI")) ? 'pill pill-on' : 'pill pill-idle';
+// Badge status aktif mengikuti isi labelnya, bukan warnanya. Firmware menulis
+// label title-case ("Misting + Blower ON"), jadi pencocokan tanpa peduli huruf
+// besar; dulu "MISTING" huruf besar tidak pernah cocok dan semua pill idle.
+export const pillClass = s => {
+  const t = (s || '').toLowerCase();
+  return ['misting', 'blower', 'irigasi'].some(k => t.includes(k)) ? 'pill pill-on' : 'pill pill-idle';
+};
 
 // --------------------------------------------------------- perintah RTDB ---
 // Firmware membaca commands/{DEVICE_ID}/{entri} = {action, value, unit?}
@@ -556,12 +569,18 @@ function cmdConfirmed(cmd, row) {
     case 'auto':
       return row.manual === false;
     case 'mist': case 'irigasi': case 'blower': {
+      // Dikonfirmasi dari status OVERRIDE hasil normalisasi ("manual" -> 'on',
+      // "forced" -> 'off'), bukan dari boolean aktuator: irigasi hanya menyala
+      // selama siklus berjalan, jadi boolean-nya bisa sudah MATI lagi saat
+      // record berikutnya masuk. Dari override, perintah "paksa mati" pun
+      // terlihat jelas tanpa harus bergantung pada aktuator yang kebetulan
+      // belum/tidak menyala.
       const ov = row.override[cmd.action];
-      if (ov === 'on' || ov === 'off' || ov === 'auto') {
-        return cmd.value ? ov === 'on' : ov !== 'on';
+      if (ov === 'on' || ov === 'off') {
+        return ov === (cmd.mode || (cmd.value ? 'on' : 'off'));
       }
-      // 'unknown' (firmware tanpa status override per aktuator): konfirmasi
-      // paling banter dari status aktuator saat ini.
+      // Firmware tanpa status override per aktuator: konfirmasi paling banter
+      // dari status aktuator saat ini (perilaku lama).
       return cmd.value ? row[cmd.action === 'mist' ? 'misting' : cmd.action] === true : row.manual === false;
     }
     case 'set_vpd':
@@ -609,6 +628,10 @@ export async function sendCommand(action, value, extra = {}) {
   }
   const body = { action: action, value: value };
   if (extra.unit) body.unit = extra.unit;
+  // mode = kemauan operator untuk aktuator: "on" paksa nyala, "off" paksa mati
+  // (irigasi: siklus dibatalkan). Perintah tanpa mode tetap dibaca firmware
+  // sebagai perilaku lama.
+  if (extra.mode) body.mode = extra.mode;
   state.cmdStatus = 'Mengirim perintah ' + cmdLabel({ action, value }) + '…';
   state.cmdError = '';
   try {
@@ -621,6 +644,7 @@ export async function sendCommand(action, value, extra = {}) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     state.pending = {
       action, value,
+      mode: extra.mode ?? null,
       seconds: extra.seconds ?? null,
       sentAt: Date.now(),
       deadline: Date.now() + CMD_TIMEOUT_MS,
@@ -633,11 +657,14 @@ export async function sendCommand(action, value, extra = {}) {
   }
 }
 
-// Sakelar aktuator: NYALA = paksa nyala, MATI = lepas override (kembali ke
-// fuzzy). Sakelar MATI bukan "paksa mati" — override manual di firmware
-// expires sendiri setelah 10 menit.
+// Sakelar aktuator = keadaan NYATA aktuator (posisi knob), sedang override
+// ditunjukkan warna track. Menyalakan sakelar = kirim mode "on" (paksa nyala);
+// mematikannya = mode "off" (paksa mati — untuk irigasi siklus dibatalkan),
+// BUKAN "lepas override". Satu-satunya jalan kembali ke fuzzy adalah tombol
+// "Kembali ke Auto" (releaseAll). Override juga expires sendiri setelah
+// 10 menit di firmware.
 export function onSwitch(action, on) {
-  sendCommand(action, on);
+  sendCommand(action, on, { mode: on ? 'on' : 'off' });
 }
 
 // Tombol "Kembali ke Auto": semua aktuator kembali ke fuzzy (controlRelease).
@@ -703,7 +730,7 @@ export function exportCsv() {
   const body = rows.map(r => [
     r.ts ? new Date(r.ts * 1000).toISOString() : '',
     r.temperature, r.humidity, r.soil, r.vpd, r.etc, r.tds,
-    r.status, r.manual ? 'YA' : 'TIDAK',
+    r.statusRaw, r.manual ? 'YA' : 'TIDAK',
     r.phase.name, r.phase.target, r.phase.active ? 'YA' : 'TIDAK',
     r.phase.duration, r.phase.elapsed, r.phase.remaining, r.device,
   ].map(csvCell).join(','));

@@ -15,13 +15,6 @@ const C = {
   muted: cssVar('--color-muted'), card2: cssVar('--color-card-2'),
 };
 
-const props = defineProps({
-  // iklim (default): Suhu + RH, perilaku lama apa adanya. air: VPD + kebutuhan/
-  // pemakaian air hari ini. Satu komponen, dua dataset-set, maks. 2 sumbu Y.
-  mode: { type: String, default: 'iklim' },
-});
-const air = props.mode === 'air';
-
 function line(label, color, yAxisID, extra = {}) {
   return {
     label, yAxisID, data: [],
@@ -31,49 +24,28 @@ function line(label, color, yAxisID, extra = {}) {
   };
 }
 
-// Garis putus-putus = "rencana" (target VPD, kebutuhan dari ETc) — tanpa
-// titik supaya tidak menutupi garis solid metaliknya (VPD, terpakai).
-const datasets = air ? [
-  line('VPD (kPa)', C.accent, 'y'),
-  line('Target VPD (kPa)', C.muted, 'y', { borderDash: [6, 4], pointRadius: 0 }),
-  line('Kebutuhan (mL)', C.warn, 'y1', { borderDash: [6, 4], pointRadius: 0 }),
-  line('Terpakai hari ini (mL)', C.ok, 'y1', { stepped: 'before' }),
-] : [
+// Satu kartu grafik: suhu & RH di sumbu masing-masing, VPD di sumbu kanan
+// kedua (Chart.js menumpuk dua sumbu berposisi 'right').
+// Target VPD sengaja TIDAK digambar: nilainya sudah terbaca di kartu Fase &
+// Setpoint VPD (PhasePanel), dan garis kedua dengan warna sama hanya membuat
+// VPD hasil ukur lebih sulit dibaca.
+const datasets = [
   line('Suhu (°C)', C.danger, 'y'),
   line('Kelembapan (%)', C.accent, 'y1'),
-  // soil2/soil3 berbagi sumbu kanan dengan kelembapan (semua %), jadi masih 2 sumbu.
-  // Seri tanpa data (record lama sebelum b9c5e3a) = null -> celah, bukan 0.
-  line('Soil 2 (%)', C.ok, 'y1', { pointRadius: 2 }),
-  line('Soil 3 (%)', C.muted, 'y1', { pointRadius: 2 }),
+  line('VPD (kPa)', C.ok, 'y2'),
 ];
 // Field di trendData yang mengisi tiap dataset, urut sesuai datasets di atas.
-const KEYS = air
-  ? ['vpd', 'vpdTarget', 'budgetMl', 'usedMl']
-  : ['temperature', 'humidity', 'soil2', 'soil3'];
+const KEYS = ['temperature', 'humidity', 'vpd'];
 
-// suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
-// garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
-// seperti lonjakan besar.
-const scales = air ? {
-  x: {
-    grid: { color: C.card2 },
-    ticks: { color: C.muted, maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 }
-  },
-  y: {
-    type: 'linear', position: 'left', suggestedMin: 0, suggestedMax: 4,
-    grid: { color: C.card2 }, border: { display: false },
-    ticks: { color: C.accent, maxTicksLimit: 6 },
-    title: { display: true, text: 'VPD (kPa)', color: C.accent, font: { weight: 600 } }
-  },
-  // Sumbu kanan memuat dua seri (kebutuhan dashed + terpakai solid), jadi
-  // warna netral abu — bukan warna salah satu seri.
-  y1: {
-    type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 12000,
-    grid: { drawOnChartArea: false }, border: { display: false },
-    ticks: { color: C.muted, maxTicksLimit: 6 },
-    title: { display: true, text: 'Volume (mL)', color: C.muted, font: { weight: 600 } }
-  }
-} : {
+// Di layar sempit judul sumbu kanan (dua-duanya) dihilangkan supaya area grafik
+// tidak habis untuk teks; tick angkanya tetap tampil. Ambang sama dengan tinggi
+// kartu (max-[700px]) sehingga satu breakpoint saja yang perlu diingat.
+const NARROW = 700;
+let narrow = false;
+
+// suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan garis jujur.
+// Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat seperti lonjakan besar.
+const scales = {
   x: {
     grid: { color: C.card2 },
     ticks: { color: C.muted, maxTicksLimit: 8, maxRotation: 0, autoSkipPadding: 12 }
@@ -88,32 +60,44 @@ const scales = air ? {
     type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100,
     grid: { drawOnChartArea: false }, border: { display: false },
     ticks: { color: C.accent, maxTicksLimit: 6 },
-    title: { display: true, text: 'Kelembapan / Tanah (%)', color: C.accent, font: { weight: 600 } }
-  }
+    title: { display: true, text: 'Kelembapan (%)', color: C.accent, font: { weight: 600 } }
+  },
+  y2: {
+    type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 4,
+    grid: { drawOnChartArea: false }, border: { display: false },
+    ticks: { color: C.ok, maxTicksLimit: 6 },
+    title: { display: true, text: 'VPD (kPa)', color: C.ok, font: { weight: 600 } }
+  },
 };
 
 const el = ref(null);
 let chart;
 
 // Sumbu X sudah menunjuk waktunya, jadi cukup "nilai + satuan" - tidak perlu
-// mengulang label.
-const label = c => {
-  if (!air) {
-    return ' ' + c.dataset.label.replace(/\s*\(.*\)/, '') + ': ' +
-      c.parsed.y.toFixed(2) + ' ' + (c.dataset.yAxisID === 'y' ? '°C' : '%');
-  }
-  if (c.datasetIndex === 0) return ' VPD: ' + c.parsed.y.toFixed(2) + ' kPa';
-  if (c.datasetIndex === 1) return ' Target VPD: ' + c.parsed.y.toFixed(2) + ' kPa';
-  if (c.datasetIndex === 2) {
-    // Kebutuhan ditulis lengkap dengan ETc penyusunnya, dari record yang sama.
-    const etc = trendData.value[c.dataIndex]?.etc;
-    return ' Kebutuhan: ' + Math.round(c.parsed.y) + ' mL' +
-      (etc !== null && etc !== undefined ? ' (ETc ' + etc.toFixed(2) + ' mm/hari)' : '');
-  }
-  return ' Terpakai hari ini: ' + Math.round(c.parsed.y) + ' mL';
-};
+// mengulang label. Satuan ikut sumbu tempat seri itu digambar.
+const UNIT = { y: '°C', y1: '%', y2: 'kPa' };
+const label = c =>
+  ' ' + c.dataset.label.replace(/\s*\(.*\)/, '') + ': ' +
+  c.parsed.y.toFixed(2) + ' ' + (UNIT[c.dataset.yAxisID] || '');
+
+// Judul sumbu kanan hanya berguna kalau ada ruang; di ponsel dua judul itu
+// memakan ~1/3 lebar grafik dan mendorong sisa ruang mati di kiri.
+function applyNarrow() {
+  if (!chart) return;
+  const show = !narrow;
+  chart.options.scales.y1.title.display = show;
+  chart.options.scales.y2.title.display = show;
+  chart.update('none');
+}
+function onResize() {
+  const nowNarrow = window.innerWidth < NARROW;
+  if (nowNarrow === narrow) return;
+  narrow = nowNarrow;
+  applyNarrow();
+}
 
 onMounted(() => {
+  narrow = window.innerWidth < NARROW;
   chart = new Chart(el.value, {
     type: 'line',
     data: { labels: [], datasets },
@@ -136,10 +120,12 @@ onMounted(() => {
       scales,
     }
   });
+  applyNarrow();
   sync();
+  window.addEventListener('resize', onResize);
 });
 
-// Data berubah tiap polling (10 s / 120 s) dan saat ganti rentang -> grafik
+// Data berubah tiap polling (2 mnt / 15 mnt) dan saat ganti rentang -> grafik
 // ikut tanpa render ulang manual, karena trendData computed dari store.
 watch(trendData, sync);
 
@@ -154,11 +140,14 @@ function sync() {
   chart.update();
 }
 
-onUnmounted(() => chart?.destroy());
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize);
+  chart?.destroy();
+});
 </script>
 
 <template>
-  <!-- Tanpa mt-5: jarak antar kartu sudah gegeben oleh gap-5 di section
+  <!-- Tanpa mt-5: jarak antar kartu sudah diberikan oleh gap-5 di section
        App.vue. mt-5 pernah ada saat grafik menempel langsung di baris metrik;
        setelah Panel Fase disisipkan, margin itu menumpuk dan jadi jarak
        dobel hanya di kartu ini. -->
@@ -166,14 +155,11 @@ onUnmounted(() => chart?.destroy());
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 class="flex items-center gap-[7px] text-[15px] font-semibold">
         <svg class="shrink-0 text-accent" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 14l4-4 4 4 5-6"/></svg>
-        {{ air ? 'Grafik Air' : 'Grafik Iklim' }}
-        <!-- Nama unit cukup sekali: kartu air selalu tepat di bawah kartu
-             iklim untuk unit yang sama. -->
-        <span v-if="!air" class="font-medium text-muted">{{ zoneName() }}</span>
+        Grafik Iklim
+        <span class="font-medium text-muted">{{ zoneName() }}</span>
       </h2>
       <div class="flex items-center gap-2">
-        <!-- Kedua kartu memakai state.trendRange yang sama: klik di salah
-             satu mengubah keduanya (plus jendela fetch & interval poll). -->
+        <!-- Rentang grafik sekaligus jendela fetch & interval poll. -->
         <div class="flex items-center rounded-lg border border-border bg-card p-0.5" role="group" aria-label="Rentang waktu grafik">
           <button v-for="(r, k) in TREND_RANGE" :key="k" type="button"
                   class="rounded-md px-2.5 py-1 text-xs font-semibold transition-colors"
@@ -192,9 +178,8 @@ onUnmounted(() => chart?.destroy());
     </div>
 
     <!-- Umur data di bawah grafik, bukan di header: pengguna bisa membedakan
-         "sensor diam 40 detik" dari "dashboardnya yang macet". Cukup di kartu
-         iklim — kartu air selalu tepat di bawahnya. -->
-    <p v-if="!air" class="mt-3 min-h-4 text-xs text-muted">
+         "sensor diam 40 detik" dari "dashboardnya yang macet". -->
+    <p class="mt-3 min-h-4 text-xs text-muted">
       <template v-if="state.online">
         <template v-if="state.age === null">Jam perangkat belum sinkron — record terakhir tidak punya field ts</template>
         <template v-else>Data terakhir {{ humanAge(state.age) }} lalu</template>

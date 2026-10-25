@@ -10,7 +10,6 @@ import Controls from './Controls.vue';
 import PhasePanel from './PhasePanel.vue';
 import TrendChart from './TrendChart.vue';
 import LogTable from './LogTable.vue';
-import SoilCard from './SoilCard.vue';
 
 onMounted(() => {
   initAuth();
@@ -100,10 +99,7 @@ const toggleView = () => { state.view = state.view === 'log' ? 'beranda' : 'log'
           <Controls />
         </div>
         <PhasePanel />
-        <SoilCard />
         <TrendChart />
-        <!-- Grafik Air: komponen yang sama, dataset berbeda (mode="air"). -->
-        <TrendChart mode="air" />
       </section>
 
       <!-- ============ LOG SENSOR ============ -->

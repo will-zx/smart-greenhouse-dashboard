@@ -1,27 +1,21 @@
 <script setup>
 import { computed } from 'vue';
-import { state, actuators, manualInfo, onSwitch, releaseAll, fmtMl } from '../store.js';
+import { state, actuators, manualInfo, switchOn, onSwitch, releaseAll } from '../store.js';
 
 const a = computed(() => actuators.value);
 const mi = computed(() => manualInfo.value);
 
-// Telemetri irigasi: dosis per siklus (dihitung dari ETc), durasi pompa, jeda
-// minimum, dan anggaran harian. Ini yang membuat "kebutuhan air -> volume
-// air" terlihat di layar. Kalau perangkat belum push field ini (firmware
-// lama), bloknya disembunyikan - bukan menampilkan angka kosong.
+// Telemetri irigasi: hanya durasi pompa dan jeda minimum. Dosis harian,
+// anggaran, dan air terpakai sudah tampil di kartu metrik — jangan diulang.
+// Field tidak ada (firmware lama) -> bloknya disembunyikan, bukan angka kosong.
 const ig = computed(() => state.lastData?.irigasiInfo || null);
 const igLine = computed(() => {
   const r = ig.value;
   if (!r) return null;
-  const dose = fmtMl(r.doseMl);
-  if (!dose) return null;
-  const parts = ['Dosis siklus ' + dose];
+  const parts = [];
   if (r.doseMs) parts.push(Math.round(r.doseMs / 1000) + ' s pompa');
   if (r.intervalMin) parts.push('jeda min ' + Math.round(r.intervalMin / 60) + ' jam');
-  const budget = fmtMl(r.budgetMl);
-  const used = fmtMl(r.usedMl);
-  if (budget) parts.push('anggaran harian ' + budget + (used ? ' (terpakai ' + used + ')' : ''));
-  return parts.join(' \u00b7 ');
+  return parts.length ? parts.join(' \u00b7 ') : null;
 });
 
 // Kartu Kontrol tetap terlihat untuk semua orang (=status aktuator berguna untuk
@@ -34,10 +28,10 @@ const igLine = computed(() => {
 const BLADE = 'M12 12c-.4-2.6.4-4.8 2.6-5.9 1.9-.9 4-.2 4.8 1.6.8 1.9-.1 4-1.9 4.9-1.6.8-3.2.3-4.4-.6';
 const spin = d => [0, 120, 240].map(r => ({ d, t: `rotate(${r} 12 12)` }));
 
-// Sakelar = status OVERRIDE, bukan status aktuator.
-//   auto  -> sakelar mati, aktuator ikut fuzzy
-//   on    -> sakelar nyala, aktuator dipaksa nyala
-//   off   -> paksa mati (hanya mungkin di firmware lama)
+// Teks mode override (baris kecil di bawah nama aktuator).
+//   auto  -> ikut fuzzy (tidak ada override)
+//   on    -> paksa nyala
+//   off   -> paksa mati
 //   unknown -> ada override tapi perangkat tidak menyebut aktuator mana
 const OV_TEXT = {
   auto: 'Auto (ikut fuzzy)',
@@ -46,16 +40,24 @@ const OV_TEXT = {
   unknown: 'Override (tidak dilaporkan)',
 };
 
+// Posisi sakelar = kehendak operator (langsung bergerak saat diklik, lalu
+// menyesuaikan record perangkat). Warna track hanya nyala/mati; mode override
+// (auto / paksa nyala / paksa mati) dibawa teks subline + banner di atas.
+const TIP = (nama, aksi) =>
+  `Sakelar ${nama}: posisi = perintah yang barusan dikirim, lalu disesuaikan dengan ` +
+  `laporan perangkat. ${aksi}. Override berakhir sendiri setelah 10 menit; ` +
+  'kembali ke fuzzy: tombol "Kembali ke Auto".';
+
 const items = computed(() => [
   { key: 'mist', label: 'Misting', on: a.value.mist, icon: [{ d: 'M4 15a7 7 0 1 1 11.7-7H17a4.5 4.5 0 0 1 2.5 8.2M8 16v1.5M12 16v2M16 16v1.5' }],
-    tip: 'Sakelar nyala = misting dipaksa nyala. Sakelar mati = override dilepas, kembali ke fuzzy.' },
+    tip: TIP('misting', 'Nyala = paksa nyala, mati = paksa mati') },
   { key: 'irigasi', label: 'Irigasi', on: a.value.irigasi, icon: [{ d: 'M7 3s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7zM17 10s3 5 3 7a3 3 0 0 1-6 0c0-2 3-7 3-7z' }],
-    tip: 'Sakelar nyala = irigasi dipaksa nyala untuk SATU siklus (FILL → FERT → DIST), lalu status kembali ke MATI.' },
+    tip: TIP('irigasi', 'Nyala = paksa nyala, mati = paksa mati') + ' Paksa nyala menjalankan SATU siklus (FILL → FERT → DIST); paksa mati membatalkan siklus.' },
   { key: 'blower', label: 'Blower', on: a.value.blower, icon: spin(BLADE), duty: a.value.level,
-    tip: 'Sakelar nyala = blower dipaksa nyala (duty 100%). Sakelar mati = kembali ke fuzzy. Duty shown = keluaran fuzzy yang berjalan.' },
+    tip: TIP('blower', 'Nyala = paksa nyala, mati = paksa mati') + ' Duty di kanan = keluaran fuzzy yang berjalan.' },
 ]);
 
-// Sakelar menyala kalau aktuator itu di-override "paksa nyala".
+// Teks mode override per aktuator: 'on' | 'off' | 'auto' | 'unknown'.
 const ovOf = k => a.value.override[k] || 'auto';
 </script>
 
@@ -127,7 +129,7 @@ const ovOf = k => a.value.override[k] || 'auto';
         <div class="ml-auto flex items-baseline gap-2.5">
           <!-- Duty blower = keluaran fuzzy (PWM), huruf kecil di bawah status. -->
           <span v-if="it.duty !== undefined && it.duty !== null" class="text-[11.5px] text-muted">Duty {{ Math.round(it.duty * 100) }} %</span>
-          <span class="text-[15px] font-bold text-danger" :class="it.on && 'text-ok'">{{ it.on ? 'ON' : 'OFF' }}</span>
+          <span class="text-[15px] font-bold" :class="it.on ? 'text-ok' : 'text-danger'">{{ it.on ? 'ON' : 'OFF' }}</span>
 
           <!-- Sakelar hanya untuk admin. Kartu kontrol tetap terlihat untuk
                semua orang (status ON/OFF berguna dipantau), tapi tanpa login
@@ -135,8 +137,10 @@ const ovOf = k => a.value.override[k] || 'auto';
                `body.read-only .switch { display:none }` di style.css lama.
                Penolakan sesungguhnya tetap di RTDB rules + sendCommand().
 
-               Sakelar menampilkan status OVERRIDE: nyala = "paksa nyala",
-               mati = "override dilepas, kembali ke fuzzy" (BUKAN "paksa mati"). -->
+               Posisi knob = kehendak operator: langsung bergerak saat diklik,
+               lalu menyesuaikan record perangkat. Warna track hanya nyala/mati
+               (mode dibawa teks subline di atas). Warna saja tidak terbaca
+               pembaca layar, jadi input diberi aria-label aksi berikutnya. -->
           <label
             v-if="state.isAdmin"
             class="switch relative inline-block h-[18px] w-[34px] shrink-0 cursor-pointer"
@@ -144,16 +148,17 @@ const ovOf = k => a.value.override[k] || 'auto';
           >
             <input
               type="checkbox" class="sr-only"
-              :checked="ovOf(it.key) === 'on'"
+              :checked="switchOn[it.key]"
+              :aria-label="`${it.label}: ${switchOn[it.key] ? 'matikan (paksa mati)' : 'nyalakan (paksa nyala)'}`"
               @change="onSwitch(it.key, $event.target.checked)"
             >
             <span
               class="absolute inset-0 rounded-full transition-colors duration-200"
-              :class="ovOf(it.key) === 'on' ? 'bg-accent-dark' : 'bg-track'"
+              :class="switchOn[it.key] ? 'bg-accent-dark' : 'bg-track'"
             />
             <span
               class="absolute left-0.5 top-0.5 h-[14px] w-[14px] rounded-full bg-white transition-transform duration-200"
-              :class="ovOf(it.key) === 'on' && 'translate-x-[16px]'"
+              :class="switchOn[it.key] && 'translate-x-[16px]'"
             />
           </label>
         </div>
