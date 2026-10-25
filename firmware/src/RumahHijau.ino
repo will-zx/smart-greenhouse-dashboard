@@ -34,7 +34,7 @@ struct Snapshot {
     float temperature, humidity, soilMoisture, soil2, soil3, vpd, etc, tds, tmean;
     bool  manual, mist, blower, irigasiRunning;
     float blowerLevel;  // 0..1, tingkat blower yang benar-benar dijalankan (PWM)
-    char  status[96];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
+    char  status[96];   // label aksi (buildStatus) + penanda SOILERR/TDSERR/...
     PhaseState phase;   // setelan fase + VPD target (untuk telemetri DB)
     OverrideState ov;   // status override manual per aktuator (sakelar dashboard)
     IrrigStatus irig;   // dosis/durasi/anggaran irigasi (telemetri DB)
@@ -72,6 +72,25 @@ static void statusAdd(char* buf, size_t n, const char* suffix) {
     size_t len = strlen(buf);
     size_t add = strlen(suffix);
     if (len + add + 1 < n) strcat(buf, suffix);
+}
+
+// Label status yang dibaca operator: AKSI yang sedang berjalan, bukan kata
+// kondisi yang ditempeli nama aktuator ("Warning MISTING" aneh dibaca dan
+// tidak memberi tahu apa yang sedang dilakukan alat). Urutan prioritas:
+// irigasi (paling banyak memindahkan air) -> misting -> blower.
+// Tanpa aktuator nyala, pakai kata kondisi fuzzy apa adanya (Normal/Monitor/
+// Warning/Kritis) supaya tidak ada kode mati di fuzzy.cpp.
+static void buildStatus(char* buf, size_t n, const char* cond,
+                        bool irig, bool mist, bool blower) {
+    const char* act[3];
+    int k = 0;
+    if (irig)   act[k++] = "Irigasi";
+    if (mist)   act[k++] = "Misting";
+    if (blower) act[k++] = "Blower";
+    if (k == 0)      snprintf(buf, n, "%s", cond);
+    else if (k == 1) snprintf(buf, n, "%s ON", act[0]);
+    else if (k == 2) snprintf(buf, n, "%s + %s ON", act[0], act[1]);
+    else             snprintf(buf, n, "%s + %s + %s ON", act[0], act[1], act[2]);
 }
 
 // Alasan reset perangkat (WDT panic / brownout / restart manual) supaya
@@ -326,10 +345,16 @@ static void controlTask(void* arg) {
         float rTds  = tdsValid ? tdsPpm : NAN;
         float rTmean = irrigationTmean();
 
+        // Label status dipakai bersama oleh serial, CSV SD, LCD, dan RTDB —
+        // satu definisi supaya yang dibaca operator sama di semua tempat.
+        char statusTxt[96];
+        buildStatus(statusTxt, sizeof(statusTxt), systemStatus,
+                    irigasiRunning, mist, blower);
+
         // Serial: SELALU cetak (walau sensor invalid) supaya kegagalan terlihat
         // di log port, bukan hanya diam di RTDB.
         Serial.printf("T:%.1fC H:%.1f%% Soil:%.1f%% VPD:%.2fkPa ETc:%.1fmm TDS:%.0fppm Tmean:%.1f [%s]",
-                      rTemp, rHum, rSoil, rVpd, rEtc, rTds, rTmean, systemStatus);
+                      rTemp, rHum, rSoil, rVpd, rEtc, rTds, rTmean, statusTxt);
         Serial.printf(" Mist:%s Irig:%s Blower:%s(lv%.0f%%) Fase:%s Kc:%.2f VPDtgt:%.2f",
                       mist ? "ON" : "OFF", irigasiRunning ? "RUN" : "OFF",
                       blower ? "ON" : "OFF", blowerLevel * 100.0,
@@ -350,7 +375,7 @@ static void controlTask(void* arg) {
                 snprintf(line, sizeof(line), "%ld,%.1f,%.1f,%.1f,%.2f,%.1f,%s,%d",
                          (long)ts, sensorData.temperature, sensorData.humidity,
                          sensorData.soilMoisture, vpdValue, etcValue,
-                         systemStatus, (int)manual);
+                         statusTxt, (int)manual);
                 sdLogRecord(line);
             }
         }
@@ -358,7 +383,7 @@ static void controlTask(void* arg) {
         unsigned long now = millis();
         if (now - lastLcd >= LCD_INTERVAL) {
             lastLcd = now;
-            updateLcd(rTemp, rHum, rSoil, rVpd, rEtc, rTds, systemStatus);
+            updateLcd(rTemp, rHum, rSoil, rVpd, rEtc, rTds, statusTxt);
         }
 
         // Publikasikan ke netTask. status_sistem lengkap dengan suffix aktuator —
@@ -380,13 +405,11 @@ static void controlTask(void* arg) {
         s.blowerLevel = blowerLevel;   // keluaran fuzzy yang jadi perintah PWM
         s.ov = ov;
         s.irig = irig;
-        // status_sistem = status fuzzy + penanda aktuator hidup + penanda
-        // kegagalan sensor/jam. Dashboard membaca string ini (pill + tabel),
-        // jadi penanda kegagalan harus ikut di sini.
-        snprintf(s.status, sizeof(s.status), "%s", systemStatus);
-        if (mist) statusAdd(s.status, sizeof(s.status), " MISTING");
-        if (blower) statusAdd(s.status, sizeof(s.status), " BLOWER");
-        if (irigasiRunning) statusAdd(s.status, sizeof(s.status), " IRIGASI");
+        // status_sistem = label aksi (buildStatus) + penanda kegagalan sensor/
+        // jam. Dashboard membaca string ini (pill + tabel + ikon error), jadi
+        // penanda kegagalan harus ikut di sini; sakelar aktuator sendiri dibaca
+        // dari field boolean/angka, bukan dari teks ini.
+        snprintf(s.status, sizeof(s.status), "%s", statusTxt);
         if (!sensorData.soilValid) statusAdd(s.status, sizeof(s.status), " SOILERR");
         if (!tdsValid) statusAdd(s.status, sizeof(s.status), " TDSERR");
         if (time(nullptr) < 100000) statusAdd(s.status, sizeof(s.status), " NOSYNC");

@@ -32,8 +32,10 @@ static HTTPClient http;
 //   blower_level     0..1    duty blower yang dijalankan (PWM 1 kHz)
 //   misting          bool    pompa misting hidup
 //   irigasi          bool    siklus irigasi berjalan
-//   status_sistem    string  status fuzzy + penanda (MISTING/BLOWER/IRIGASI/
-//                            SOILERR/TDSERR/NOSYNC/IRIGOFF)
+//   status_sistem    string  aksi yang berjalan ("Misting ON", "Misting +
+//                            Blower ON", "Irigasi ON") atau kata kondisi
+//                            (Normal/Monitor/Warning/Kritis/Sensor Error),
+//                            ditambah penanda SOILERR/TDSERR/NOSYNC/IRIGOFF
 //   manual_mode      bool    ada aktuator yang di-override manual
 //   mist_ov          string  override misting: "auto" | "manual" | "forced"
 //   irig_ov          string  override irigasi: "auto" | "manual" | "forced"
