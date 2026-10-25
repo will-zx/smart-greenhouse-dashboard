@@ -201,10 +201,11 @@ static const float SUN_P_MONTH[12] = {
 // terbuka) menurut debit pompa yang sudah terukur, sehingga konsentrasi
 // diharapkan jatuh di dalam rentang. TDS memverifikasi dugaan itu.
 //
-// PERILAKU SAAT DI LUAR RENTANG: distribusi TETAP dijalankan dan hanya
-// diberi PERINGATAN (holdReason + status di dashboard). Alasannya, air yang
-// tertahan lebih berbahaya bagi tanaman daripada larutan yang sedikit meleset.
-// Kalau kelak mau ditahan sungguhan, ubah tdsDitolak() di irrigation.cpp.
+// PERILAKU SAAT DI LUAR RENTANG: kalau TDS TERBACA sah dan di luar rentang,
+// DIST DITAHAN (siklus dibatalkan, anggaran harian dikembalikan) karena kimia
+// larutannya jelas salah. Kalau probe TIDAK terbaca (tdsValid=false), air
+// tetap dialirkan dengan peringatan - tanpa probe tanaman tidak akan pernah
+// disiram. Lihat fase IRRIG_CHECK di irrigation.cpp.
 #define TDS_PIN         35
 #define TDS_ADC_MAX     4095.0
 #define TDS_REF_VOLT    3.3

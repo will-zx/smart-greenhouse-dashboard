@@ -60,10 +60,11 @@ IrrigStatus irrigationStatus();
 //
 // tdsPpm/tdsValid dipakai di fase CHECK. Dosis stok A/B berjalan selama
 // IRRIG_FERT_MS (lingkaran terbuka, menurut debit pompa terukur), jadi TDS
-// hanya MEMVERIFIKASI dugaan itu. Kalau hasilnya di luar
-// TDS_MIN_PPM..TDS_MAX_PPM, holdReason diisi sebagai PERINGATAN untuk
-// dashboard tapi distribusi TETAP dijalankan - air yang tertahan lebih
-// berbahaya bagi tanaman daripada larutan yang sedikit meleset.
+// hanya MEMVERIFIKASI dugaan itu.
+// Kalau ppm TERBACA sah dan di luar TDS_MIN_PPM..TDS_MAX_PPM, DIST DITAHAN:
+// siklus dibatalkan, anggaran harian dikembalikan, holdReason diisi.
+// Kalau probe TIDAK terbaca (tdsValid=false), air tetap dialirkan dengan
+// peringatan - tanpa probe tanaman tidak akan pernah disiram.
 void irrigationUpdate(bool trigger, bool manual, float tdsPpm, bool tdsValid);
 bool irrigationRunning();         // ada fase aktif (dipakai status_sistem)
 void irrigationAbort();           // sensor tidak valid / darurat -> pompa mati
