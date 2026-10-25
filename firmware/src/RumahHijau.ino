@@ -31,7 +31,7 @@ static const int NET_TASK_CORE = 0;
 // ==== Jembatan controlTask -> netTask ====
 // Satu struct kecil di bawah mutex: kontrol menulis, jaringan membaca.
 struct Snapshot {
-    float temperature, humidity, soilMoisture, vpd, etc, tds, tmean;
+    float temperature, humidity, soilMoisture, soil2, soil3, vpd, etc, tds, tmean;
     bool  manual, mist, blower, irigasiRunning;
     float blowerLevel;  // 0..1, tingkat blower yang benar-benar dijalankan (PWM)
     char  status[96];   // sudah termasuk suffix " MISTING"/" BLOWER"/" IRIGASI"
@@ -44,7 +44,8 @@ static Snapshot gSnap;
 static SemaphoreHandle_t snapMux = nullptr;
 
 // Filter EMA sinyal sensor (lihat filter.h). Alfa dari config.h.
-static EmaFilter tempFilter, humFilter, soilFilter, tdsFilter;
+static EmaFilter tempFilter, humFilter, tdsFilter;
+static EmaFilter soilFilter[SOIL_COUNT];   // satu EMA per probe tanah
 
 // VPD (Tetens): kPa = SVP - AVP.
 static float calcVpd(float temp, float humidity) {
@@ -151,8 +152,7 @@ static void controlTask(void* arg) {
     }
 
     for (;;) {
-        float soilRaw = analogRead(SOIL_PIN);
-        sensorData = readSensors(soilRaw);
+        sensorData = readSensors();          // T/RH + tiga probe tanah (SOIL_PINS)
         // Filter EMA suhu/RH (input VPD) & soil agar VPD dan keputusan irigasi stabil.
         // Suhu/RH wajib lewat guard valid: readSensors bisa mengembalikan NaN dan
         // NaN yang masuk EMA merusak nilainya secara permanen. Soil tidak - probe
@@ -161,18 +161,29 @@ static void controlTask(void* arg) {
             sensorData.temperature = emaUpdate(tempFilter, sensorData.temperature);
             sensorData.humidity    = emaUpdate(humFilter, sensorData.humidity);
         }
-        // Soil: HANYA nilai valid yang masuk filter. Probe dicabut -> raw
-        // mengambang -> 0 %/100 % palsu yang akan meracuni filter dan membuat
-        // irigasi nyala/mati diam-diam. Kalau tidak valid, pakai nilai sah
-        // terakhir (soilFilter.value) supaya keputusan tidak berubah liar.
-        if (sensorData.soilValid) {
-            sensorData.soilMoisture = emaUpdate(soilFilter, sensorData.soilMoisture);
-        } else if (soilFilter.seeded) {
-            sensorData.soilMoisture = soilFilter.value;   // nilai sah terakhir
+        // Soil: HANYA probe valid yang masuk filter dan rata-rata. Probe dicabut
+        // -> raw mengambang -> 0 %/100 % palsu yang akan meracuni filter dan
+        // membuat irigasi nyala/mati diam-diam. Probe yang mati tidak menarik
+        // rata-rata; kalau semuanya mati, pakai nilai sah terakhir.
+        float soilSum = 0.0f;
+        int   soilN = 0;
+        for (int i = 0; i < SOIL_COUNT; i++) {
+            if (isnan(sensorData.soilPct[i])) continue;
+            sensorData.soilPct[i] = emaUpdate(soilFilter[i], sensorData.soilPct[i]);
+            soilSum += sensorData.soilPct[i];
+            soilN++;
+        }
+        if (soilN > 0) {
+            sensorData.soilMoisture = soilSum / (float)soilN;
         } else {
+            float lastSum = 0.0f;
+            int   lastN = 0;
+            for (int i = 0; i < SOIL_COUNT; i++) {
+                if (soilFilter[i].seeded) { lastSum += soilFilter[i].value; lastN++; }
+            }
             // Belum pernah ada sampel sah: pakai kondisi NETRAL (50 %), bukan
             // 0 % kering palsu (bikin fuzzy tambah misting tanpa alasan).
-            sensorData.soilMoisture = 50.0f;
+            sensorData.soilMoisture = (lastN > 0) ? (lastSum / (float)lastN) : 50.0f;
         }
 
         // TDS dipakai sebagai PEMERIKSA di fase CHECK: dosis stok A/B jalan
@@ -217,8 +228,8 @@ static void controlTask(void* arg) {
                 Serial.printf("[!] Sensor error: %s\n", getSensorError());
             }
             if (!sensorData.soilValid) {
-                Serial.printf("[!] Probe tanah di luar rentang (raw %.0f) - irigasi fuzzy DITAHAN (override manual tetap berlaku)\n",
-                              soilRaw);
+                Serial.printf("[!] Probe tanah di luar rentang (raw %.0f/%.0f/%.0f) - irigasi fuzzy DITAHAN (override manual tetap berlaku)\n",
+                              sensorData.soilRaw[0], sensorData.soilRaw[1], sensorData.soilRaw[2]);
             }
             if (!tdsValid) {
                 Serial.println("[!] TDS tidak terbaca sah - TDS hanya telemetri");
@@ -305,6 +316,11 @@ static void controlTask(void* arg) {
         float rTemp = sensorData.valid ? sensorData.temperature : NAN;
         float rHum  = sensorData.valid ? sensorData.humidity : NAN;
         float rSoil = sensorData.soilValid ? sensorData.soilMoisture : NAN;
+        // Probe 2/3 dilaporkan terpisah supaya pot yang mengering lebih dulu
+        // kelihatan. NAN = probe itu tidak masuk akal siklus ini (field dibuang
+        // saat push, dashboard menampilkan "-").
+        float rSoil2 = sensorData.soilPct[1];
+        float rSoil3 = sensorData.soilPct[2];
         float rVpd  = sensorData.valid ? vpdValue : NAN;
         float rEtc  = sensorData.valid ? etcValue : NAN;
         float rTds  = tdsValid ? tdsPpm : NAN;
@@ -320,10 +336,11 @@ static void controlTask(void* arg) {
                       phaseGet().name, phaseKc(), phaseVpdTarget());
         // Status override manual: '-' = ikut fuzzy, '+' = paksa nyala,
         // '0' = paksa mati (identik dengan mist_ov/irig_ov/blower_ov di RTDB).
-        Serial.printf(" OV[m%c i%c b%c]\n",
+        Serial.printf(" OV[m%c i%c b%c] SoilRaw:%.0f/%.0f/%.0f\n",
                       ov.mist < 0 ? '-' : (ov.mist ? '+' : '0'),
                       ov.irig < 0 ? '-' : (ov.irig ? '+' : '0'),
-                      ov.blower < 0 ? '-' : (ov.blower ? '+' : '0'));
+                      ov.blower < 0 ? '-' : (ov.blower ? '+' : '0'),
+                      sensorData.soilRaw[0], sensorData.soilRaw[1], sensorData.soilRaw[2]);
 
         if (sensorData.valid) {
             // Backup lokal: seluruh pembacaan valid dicatat ke MicroSD.
@@ -350,6 +367,8 @@ static void controlTask(void* arg) {
         s.temperature = rTemp;
         s.humidity = rHum;
         s.soilMoisture = rSoil;
+        s.soil2 = rSoil2;
+        s.soil3 = rSoil3;
         s.vpd = rVpd;
         s.etc = rEtc;
         s.tds = rTds;
@@ -418,6 +437,7 @@ static void netTask(void* arg) {
                 lastPush = now;
                 String body;
                 bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
+                                        s.soil2, s.soil3,
                                         s.vpd, s.etc, s.tds, s.blowerLevel, s.mist,
                                         s.irigasiRunning, s.status, s.manual, s.phase,
                                         s.ov, s.tmean, s.irig, &body);
@@ -468,7 +488,7 @@ void setup() {
     initSensor();
     emaInit(tempFilter, EMA_ALPHA_TEMP);
     emaInit(humFilter, EMA_ALPHA_HUM);
-    emaInit(soilFilter, EMA_ALPHA_SOIL);
+    for (int i = 0; i < SOIL_COUNT; i++) emaInit(soilFilter[i], EMA_ALPHA_SOIL);
     emaInit(tdsFilter, EMA_ALPHA_TDS);
     phaseInit();
     // Jejak boot: fase + Kc aktif + status irigasi otomatis (gate kalibrasi).

@@ -19,7 +19,10 @@ static HTTPClient http;
 //
 //   temperature      °C      suhu udara (SHT31)
 //   humidity         %       kelembapan relatif udara (SHT31)
-//   soil             %       kelembapan tanah (probe capacitive)
+//   soil             %       kelembapan tanah, RATA-RATA probe yang valid
+//   soil2, soil3     %       probe tanah ke-2 dan ke-3 (SOIL_PINS) untuk
+//                            melihat pot yang mengering lebih dulu; tidak
+//                            dipakai keputusan fuzzy
 //   vpd              kPa     defisit tekanan uap (Tetens, dari T & RH)
 //   etc              mm/hari kebutuhan air tanaman (Blaney-Criddle x Kc fase)
 //   et0              mm/hari ALIAS LAMA dari "etc" (deprecated, hapus nanti)
@@ -203,7 +206,8 @@ static const char* ovName(int8_t ov) {
     return (ov == 1) ? "manual" : "forced";
 }
 
-bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
+bool pushSensorLog(float temperature, float humidity, float soil, float soil2, float soil3,
+                   float vpd, float etc, float tds,
                    float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
                    const OverrideState& ov, float tmean, const IrrigStatus& irig,
@@ -220,6 +224,8 @@ bool pushSensorLog(float temperature, float humidity, float soil, float vpd, flo
     putNum(doc, "temperature", temperature);
     putNum(doc, "humidity", humidity);
     putNum(doc, "soil", soil);
+    putNum(doc, "soil2", soil2);
+    putNum(doc, "soil3", soil3);
     putNum(doc, "vpd", vpd);
     // "etc" = nama final (isi = ETc, sudah x Kc). "et0" disimpan sebagai
     // alias lama supaya dashboard yang belum migrate tidak ikut rusak;

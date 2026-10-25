@@ -21,7 +21,14 @@
 // Sensor: SHT31 (I2C, akurasi ±0.2°C / ±2% RH) — share bus dengan LCD.
 // Alamat default 0x44 (LCD backpack PCF8574 di 0x27). Modul SHT31 umumnya sudah ada pull-up I2C.
 #define SHT31_I2C_ADDR  0x44
-#define SOIL_PIN        34
+
+// Tiga probe soil (kapasitif) supaya satu zona terwakili beberapa titik tanam.
+// WAJIB di ADC1: selama WiFi aktif, ADC2 (GPIO 0,2,4,12-15,25-27) tidak bisa
+// dipakai. Pemakaian ADC1 sekarang: 34/33/39 = soil, 35 = TDS, 32 = PUMP_DIST.
+// 36 (VP) sengaja dikosongkan sebagai cadangan. 36/39 input-only tanpa
+// pull-up - aman untuk keluaran analog modul ini.
+#define SOIL_COUNT      3
+#define SOIL_PINS       {34, 33, 39}
 
 // I2C bus bersama: SHT31 + LCD 20x4 (backpack PCF8574 0x27; 0x3F = cadangan).
 #define I2C_SDA         21
@@ -183,15 +190,27 @@ static const float SUN_P_MONTH[12] = {
 #define KC_DEFAULT        KC_VEGETATIF
 
 // Soil Moisture Calibration (modul KAPASITIF, inverted ADC: kering=tinggi, basah=rendah).
-// SOIL_DRY  = ADC saat probe di udara kering (teramati ~2644 di serial).
-// SOIL_WET  = ADC saat probe terendam penuh air (asumsi v1.2; ganti dengan ukur asli).
-// ponytail: nilai sementara dari pembacaan serial; kalibrasi ulang setelah ukur titik basah.
-#define SOIL_DRY   2644
-#define SOIL_WET   1200
+// Urutan array = urutan SOIL_PINS: {34, 33, 39}.
+// Kalibrasi PER PROBE: dua modul model sama bisa beda ratusan count, jadi satu
+// angka untuk semuanya membuat persentase salah. Cara ukur (~10 menit):
+//   1) probe di udara kering, tunggu ~3 menit, baca "raw" pada baris Soil:n
+//   2) probe terendam penuh di air, baca lagi
+//   3) isi SOIL_DRY_CAL = bacaan kering, SOIL_WET_CAL = bacaan basah
+//      (kering selalu > basah karena ADC terbalik; kalau tidak, kabel tertukar)
+// ponytail: angka awal masih asumsi v1.2 (2644/1200); ukur ulang per probe.
+#define SOIL_DRY_CAL    {2644, 2644, 2644}
+#define SOIL_WET_CAL    {1200, 1200, 1200}
 // Toleransi raw ADC di luar titik kalibrasi. Probe dicabut -> ADC mengambang
 // (0 atau 4095) -> di luar rentang ini -> ditandai tidak valid (bukan 100 %
 // basah / 0 % kering palsu). Angka ini hanya "jaring pengaman", bukan kalibrasi.
 #define SOIL_RAW_TOL 300
+// Sampel per kanal. Sampel pertama DIBUANG (bukan dirata-rata) karena ADC
+// ESP32 masih membawa sisa muatan kanal sebelumnya; kapasitif berimpedansi
+// tinggi sehingga satu bacaan pertama sering meleset jauh.
+#define SOIL_SAMPLES   4
+// Jeda antar kanal. Kalau angka tiga probe terlihat saling "menular" (mis. probe
+// 33 mengikuti nilai 34), naikkan ini; kelipatan 10 ms murah di loop 2 s.
+#define SOIL_SETTLE_MS 10
 
 // TDS Meter v1.0 (analog, klon DFRobot SEN0244) di ember campuran irigasi.
 // Output ~0..2.3V. GPIO35 = ADC input-only tanpa pull-up. Kompensasi suhu

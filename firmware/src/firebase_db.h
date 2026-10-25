@@ -12,7 +12,8 @@
 // ov: status override manual per aktuator (mist_ov/irig_ov/blower_ov).
 // tmean: suhu rata-rata sliding yang dipakai menghitung ETc (approach label).
 // irig: dosis/durasi/anggaran/terpakai irigasi (telemetri dashboard).
-bool pushSensorLog(float temperature, float humidity, float soil, float vpd, float etc, float tds,
+bool pushSensorLog(float temperature, float humidity, float soil, float soil2, float soil3,
+                   float vpd, float etc, float tds,
                    float blowerLevel, bool misting, bool irigasi,
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
                    const OverrideState& ov, float tmean, const IrrigStatus& irig,
