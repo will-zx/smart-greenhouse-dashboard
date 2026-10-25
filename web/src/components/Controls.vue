@@ -92,14 +92,23 @@ const ovOf = k => a.value.override[k] || 'auto';
       <b>Irigasi otomatis dimatikan di perangkat</b> — debit pompa belum dikalibrasi. Perintah manual tetap bisa dijalankan.
     </div>
 
+    <!-- Irigasi alasan tahan: peringatan (kuning), bukan info kecil.
+         Kondisi perangkat -> tampil juga untuk tamu. -->
+    <div
+      v-if="igLine && ig.holdReason"
+      class="mb-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[11.5px] leading-snug text-warn"
+    >
+      <b>Siklus irigasi ditahan</b> — {{ ig.holdReason }}
+    </div>
+
     <!-- Telemetri irigasi: dosis dari ETc, durasi pompa, jeda minimum, dan
-         anggaran harian. disembunyikan kalau perangkat belum mengirimnya. -->
+         progres siklus (anggaran harian vs terpakai hari ini).
+         disembunyikan kalau perangkat belum mengirimnya. -->
     <div
       v-if="igLine"
       class="mb-3 rounded-lg border border-border bg-card-2 px-3 py-2 text-[11px] leading-snug text-muted"
     >
       {{ igLine }}
-      <span v-if="ig.holdReason" class="block text-warn">Ditahan: {{ ig.holdReason }}</span>
     </div>
 
     <div class="flex flex-col gap-2">

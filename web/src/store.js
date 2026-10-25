@@ -192,6 +192,8 @@ export function normLog(l, key) {
     temperature: numOrNull(src.temperature),
     humidity: numOrNull(src.humidity),
     soil: numOrNull(src.soil),
+    soil2: numOrNull(src.soil2),
+    soil3: numOrNull(src.soil3),
     vpd: numOrNull(src.vpd),
     etc,
     tds: numOrNull(src.tds),
@@ -339,7 +341,7 @@ export async function fetchDataLogs() {
 // di store, bukan di komponen, supaya kedua kartu grafik menampilkan data
 // yang sama persis. null tidak ikut dirata-rata — rata-rata tetap null ->
 // Chart.js menggambar celah, bukan 0 palsu.
-const FLAT_FIELDS = ['temperature', 'humidity', 'vpd', 'etc', 'vpdTarget', 'budgetMl'];
+const FLAT_FIELDS = ['temperature', 'humidity', 'vpd', 'etc', 'vpdTarget', 'budgetMl', 'soil2', 'soil3'];
 
 // Field trendData dipetakan flat dari baris normLog (grafik cuma butuh angka).
 function flatRow(r) {
@@ -348,6 +350,8 @@ function flatRow(r) {
     temperature: r.temperature,
     humidity: r.humidity,
     vpd: r.vpd,
+    soil2: r.soil2,
+    soil3: r.soil3,
     etc: r.etc,
     vpdTarget: r.phase.target,
     budgetMl: r.irigasiInfo.budgetMl,

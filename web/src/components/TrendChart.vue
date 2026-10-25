@@ -41,11 +41,15 @@ const datasets = air ? [
 ] : [
   line('Suhu (°C)', C.danger, 'y'),
   line('Kelembapan (%)', C.accent, 'y1'),
+  // soil2/soil3 berbagi sumbu kanan dengan kelembapan (semua %), jadi masih 2 sumbu.
+  // Seri tanpa data (record lama sebelum b9c5e3a) = null -> celah, bukan 0.
+  line('Soil 2 (%)', C.ok, 'y1', { pointRadius: 2 }),
+  line('Soil 3 (%)', C.muted, 'y1', { pointRadius: 2 }),
 ];
 // Field di trendData yang mengisi tiap dataset, urut sesuai datasets di atas.
 const KEYS = air
   ? ['vpd', 'vpdTarget', 'budgetMl', 'usedMl']
-  : ['temperature', 'humidity'];
+  : ['temperature', 'humidity', 'soil2', 'soil3'];
 
 // suggestedMin/Max, bukan min/max: rentang tetap supaya kemiringan
 // garis jujur. Tanpa ini Chart.js auto-zoom dan 0.5°C terlihat
@@ -84,7 +88,7 @@ const scales = air ? {
     type: 'linear', position: 'right', suggestedMin: 0, suggestedMax: 100,
     grid: { drawOnChartArea: false }, border: { display: false },
     ticks: { color: C.accent, maxTicksLimit: 6 },
-    title: { display: true, text: 'Kelembapan (%)', color: C.accent, font: { weight: 600 } }
+    title: { display: true, text: 'Kelembapan / Tanah (%)', color: C.accent, font: { weight: 600 } }
   }
 };
 
