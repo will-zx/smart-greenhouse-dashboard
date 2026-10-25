@@ -60,9 +60,9 @@
 //  1) IRRIG_FILL_MS  = volume ember (mL) / debit FILL (31,7 mL/s) x 1000.
 //  2) IRRIG_FERT_MS  = dosis yang diminta resep AB Mix / debit FERT (22,2 mL/s).
 //  3) IRRIG_SETTLE_MS = jeda sampai pembacaan TDS berhenti bergerak.
-#define IRRIG_FILL_MS      30000   // TODO: belum diukur
-#define IRRIG_FERT_MS      45000   // TODO: belum diukur
-#define IRRIG_SETTLE_MS    30000   // TODO: belum diukur
+#define IRRIG_FILL_MS      157728  // 5000 mL / 31,7 mL/s x 1000 = ~2 menit 38 detik (TODO: verifikasi lapangan)
+#define IRRIG_FERT_MS      1126    // 25 mL stok / 22,2 mL/s x 1000 = ~1,1 detik (TODO: sesuaikan via fase CHECK sampai TDS 800-1000 ppm)
+#define IRRIG_SETTLE_MS    30000   // TODO: ukur lapangan - jeda sampai pembacaan TDS berhenti bergerak
 // Jeda singkat di fase CHECK supaya pembacaan TDS stabil sebelum dinilai.
 // SETTLE sudah memberi 30 detik tanpa pompa, jadi ini hanya jeda tambahan
 // satu putaran loop controlTask (2 detik).
