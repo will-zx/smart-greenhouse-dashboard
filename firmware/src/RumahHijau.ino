@@ -383,7 +383,7 @@ static void controlTask(void* arg) {
         unsigned long now = millis();
         if (now - lastLcd >= LCD_INTERVAL) {
             lastLcd = now;
-            updateLcd(rTemp, rHum, rSoil, rVpd, rEtc, rTds, statusTxt);
+            updateLcd(rTemp, rHum, rSoil, rVpd, rEtc, rTds);
         }
 
         // Publikasikan ke netTask. status_sistem lengkap dengan suffix aktuator —
@@ -414,6 +414,9 @@ static void controlTask(void* arg) {
         if (!tdsValid) statusAdd(s.status, sizeof(s.status), " TDSERR");
         if (time(nullptr) < 100000) statusAdd(s.status, sizeof(s.status), " NOSYNC");
         if (!IRRIG_AUTO_ENABLED) statusAdd(s.status, sizeof(s.status), " IRIGOFF");
+        // LCD ikut menampilkan penanda error (sekarang bisa, karena teksnya
+        // bergeser; dulu kepotong di kolom 20).
+        lcdScrollSetStatus(s.status);
         s.phase = phaseGet();
         snapshotPublish(s);
 
@@ -506,7 +509,9 @@ void setup() {
         Serial.printf("[wdt] GAGAL init Task WDT: %s\n", esp_err_to_name(wdtErr));
     }
 
+    i2cBusInit();     // mutex bus I2C dipakai SHT31 + LCD (dua task)
     initLcd();
+    lcdScrollStart(); // task marquee baris status (core 0, prio 1)
     initSdLogger();
     initSensor();
     emaInit(tempFilter, EMA_ALPHA_TEMP);

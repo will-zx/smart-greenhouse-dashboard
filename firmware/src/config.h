@@ -117,6 +117,20 @@
 // agar push DB & LCD tetap stabil).
 #define LCD_INTERVAL    1000
 
+// Baris status LCD (baris 4) di-scroll kalau lebih dari 20 kolom, karena
+// controlTask cuma refresh tiap 2 s (terlalu lambat untuk marquee) sehingga
+// geseran dikerjakan task kecil sendiri. 350 ms/karakter = ~7 s per putaran
+// 20 kolom; ukur dengan mata di jarak baca ~1 m: kalau terasa cepat naikkan,
+// kalau lambat turunkan.
+#define LCD_SCROLL_MS       350
+// Jeda di awal dan akhir teks supaya sempat terbaca sebelum mulai bergeser.
+#define LCD_SCROLL_HOLD_MS  1500
+// Prioritas di bawah netTask (2) dan controlTask (3): scroll tidak boleh
+// menyalip kontrol aktuator. Core 0 (tempat netTask) supaya core 1 tetap
+// khusus kontrol.
+#define LCD_SCROLL_PRIO     1
+#define LCD_SCROLL_STACK    3072   // Wire + LiquidCrystal_I2C + snprintf
+
 // PSU cadangan: hardware-only — ESP32 + aktuator bisa ditenagai powerbank/PSU
 // kedua saat listrik mati. Tidak ada kode khusus; dokumentasi di Laporan.
 

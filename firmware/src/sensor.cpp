@@ -5,6 +5,24 @@
 static Adafruit_SHT31 sht31 = Adafruit_SHT31();
 static bool shtOk = false;
 
+// Satu mutex untuk seluruh bus I2C (SHT31 + LCD). Wire tidak thread-safe dan
+// bus dipakai dua task (control + scroll LCD), jadi semua transaksi lewat sini.
+static SemaphoreHandle_t i2cMux = nullptr;
+
+void i2cBusInit() {
+    if (!i2cMux) i2cMux = xSemaphoreCreateMutex();
+}
+
+bool i2cLock(TickType_t timeout) {
+    // Belum di-init = masih fase setup satu task; tidak perlu dikunci.
+    if (!i2cMux) return true;
+    return xSemaphoreTake(i2cMux, timeout) == pdTRUE;
+}
+
+void i2cUnlock() {
+    if (i2cMux) xSemaphoreGive(i2cMux);
+}
+
 // Salinan SOIL_PINS / SOIL_*_CAL dari config.h. Array (bukan #define langsung
 // di dalam loop) supaya satu loop bisa menangani tiga probe tanpa duplikasi.
 static const uint8_t soilPins[SOIL_COUNT] = SOIL_PINS;
@@ -49,8 +67,16 @@ static bool soilPercent(uint8_t ch, float raw, float* out) {
 
 SensorData readSensors() {
     SensorData data;
-    data.temperature = sht31.readTemperature();
-    data.humidity = sht31.readHumidity();
+    // Gagal dapat bus (task scroll LCD sedang menulis) bukan alasan memblokir
+    // kontrol: laporkan NaN, siklus berikutnya (2 s lagi) baca ulang.
+    if (i2cLock(pdMS_TO_TICKS(50))) {
+        data.temperature = sht31.readTemperature();
+        data.humidity = sht31.readHumidity();
+        i2cUnlock();
+    } else {
+        data.temperature = NAN;
+        data.humidity = NAN;
+    }
 
     // Tiga probe dibaca bergantian. Keputusan irigasi memakai RATA-RATA probe
     // yang valid, sedangkan tiap probe tetap dilaporkan (soil2/soil3) supaya
@@ -79,6 +105,10 @@ SensorData readSensors() {
 
 const char* getSensorError() {
     if (!shtOk) return "SHT31 tidak terdeteksi";
-    if (isnan(sht31.readTemperature())) return "read gagal (bus I2C?)";
+    // Pembacaan di sini juga memakai bus I2C (bukan cuma diagnostik teks).
+    if (!i2cLock(pdMS_TO_TICKS(50))) return "bus I2C sibuk";
+    bool gagal = isnan(sht31.readTemperature());
+    i2cUnlock();
+    if (gagal) return "read gagal (bus I2C?)";
     return "OK";
 }
