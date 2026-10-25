@@ -223,6 +223,11 @@ static const float SUN_P_MONTH[12] = {
 #define TDS_RAW_MAX     3000
 #define TDS_PPM_MIN     50.0f
 #define TDS_PPM_MAX     5000.0f
+// Ambang stabilitas antar 8 sampel TDS. Pin GPIO35 (ADC input-only, tanpa
+// pull-up/pull-down) melayang saat probe dicabut -> nilai tengah tak stabil
+// yang lolos cek rentang [TDS_RAW_MIN, TDS_RAW_MAX] dan menghasilkan PPM palsu.
+// Kalau spread terlalu besar, angka dianggap tidak andal -> valid = false.
+#define TDS_FLOAT_SPREAD 300.0f
 
 // Filter EMA (Exponential Moving Average): y[n] = alpha*x[n] + (1-alpha)*y[n-1].
 // alpha kecil = lebih halus tapi lebih lambat. Dipakai untuk suhu & kelembaban

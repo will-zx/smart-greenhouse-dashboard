@@ -10,15 +10,21 @@ float readTDS(float temperatureC, bool* valid) {
     // Rata-rata beberapa sampel meredam noise ADC (pompa fert mengaduk air).
     float sum = 0;
     const int N = 8;
+    float mn = 4096.0f, mx = -1.0f;
     for (int i = 0; i < N; i++) {
-        sum += analogRead(TDS_PIN);
+        float s = (float)analogRead(TDS_PIN);
+        sum += s;
+        if (s < mn) mn = s;
+        if (s > mx) mx = s;
         delay(10);
     }
     float raw = sum / N;
-    // Probe dicabut / tidak terendam -> ADC mengambang (0 atau 4095) atau
-    // membaca ~0 V. Nilai seperti itu jangan dipakai: dosis pupuk berbasis
-    // angka garbage = tidak pernah jalan atau jalan terus.
+    // Probe dicabut / tidak terendam -> ADC melayang (0, 4095, atau nilai
+    // tengah tak stabil). Nilai tengah yang lolos rentang [TDS_RAW_MIN,
+    // TDS_RAW_MAX] masih menghasilkan PPM palsu. Bila spread antar sampel
+    // besar, angka tidak andal: jangan terbitkan PPM.
     if (raw < TDS_RAW_MIN || raw > TDS_RAW_MAX) return 0.0f;
+    if ((mx - mn) > TDS_FLOAT_SPREAD) return 0.0f;
 
     float v = raw / TDS_ADC_MAX * TDS_REF_VOLT;
     float comp = 1.0 / (1.0 + 0.02 * (temperatureC - 25.0));
