@@ -62,8 +62,8 @@ export const state = reactive({
 
   // koneksi
   online: false,
-  // umur data (detik). null = record terakhir tidak punya field ts, jadi
-  // jam perangkat belum sinkron — BUKAN "NaN menit" dan bukan pill hijau.
+  // umur data (detik). null = record tepercaya tidak ada atau jamnya belum
+  // sinkron — BUKAN "NaN menit" dan bukan pill hijau.
   age: null,
   loadError: '',
 
@@ -154,6 +154,12 @@ function parseOverride(v) {
   }
   return null;
 }
+
+// Record tepercaya untuk menentukan "data terakhir": punya ts DAN jam perangkat
+// sudah sinkron. Record tanpa ts bukan berarti terbaru — firmware menulis ts
+// hanya setelah NTP sinkron, jadi record seperti itu bisa berasal dari boot
+// mana pun (termasuk backlog MicroSD yang diputar ulang).
+const clockTrusted = r => !!r && r.ts !== null && r.synced === true;
 
 // Override per aktuator.
 // Firmware 61d1bad: override manual TRIS-TATA per aktuator (-1 ikut fuzzy,
@@ -311,6 +317,11 @@ export async function loadLabels() {
   }
 }
 
+// Record terakhir menurut urutan key (bukan ts) dari fetch terakhir. Dipakai
+// checkPending(): konfirmasi perintah tidak boleh tertunda hanya karena record
+// terbaru belum punya ts.
+let latestAny = null;
+
 export async function fetchDataLogs() {
   try {
     const path = `zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=${state.logLimit}`;
@@ -321,26 +332,37 @@ export async function fetchDataLogs() {
 
     // Urut berdasarkan ts, bukan kunci push-ID. Kunci RTDB urut saat apa yang
     // ditulis, tapi record lama yang diputar ulang dari backlog MicroSD tetap
-    // dapat kunci baru - jadi kunci != waktu. Record TANPA ts (jam perangkat
-    // belum sinkron) diletakkan di akhir: mereka yang terbaru.
+    // dapat kunci baru - jadi kunci != waktu. Record TANPA ts tidak boleh
+    // dianggap terbaru: firmware hanya menulis ts setelah NTP sinkron, jadi
+    // record itu bisa berasal dari boot mana pun. Paling tua = di depan.
     const rows = Object.entries(obj).map(([k, v]) => normLog(v, k));
+    // Record terakhir menurut urutan key (urutan tulis RTDB), SEBELUM diurutkan
+    // menurut ts. Dipakai untuk konfirmasi perintah: perangkat bisa saja baru
+    // mengeksekusi perintah pada record yang belum punya ts.
+    latestAny = rows[rows.length - 1] || null;
     rows.sort((a, b) => {
-      const at = a.ts === null ? Infinity : a.ts;
-      const bt = b.ts === null ? Infinity : b.ts;
+      const at = a.ts === null ? -Infinity : a.ts;
+      const bt = b.ts === null ? -Infinity : b.ts;
       if (at === bt) return 0;
       return at - bt;
     });
 
-    state.lastData = rows[rows.length - 1] || null;
-    if (!state.lastData) throw new Error('kosong');
-
     state.logData = rows;
 
+    // "Data terakhir" = record tepercaya terbaru. Kalau tidak ada satu pun yang
+    // tepercaya (jam perangkat belum pernah sinkron), pakai record terakhir
+    // apa adanya supaya metrik tetap terisi dan pill jujur bilang belum sinkron.
+    const trusted = rows.filter(clockTrusted);
+    state.lastData = trusted.length ? trusted[trusted.length - 1] : latestAny;
+    if (!state.lastData) throw new Error('kosong');
+
     // Offline bukan cuma fetch gagal: log terakhir yang basi juga berarti
-    // ESP32 yang hidup tapi tidak push (padam/offline).
-    state.age = state.lastData.ts === null
-      ? null
-      : Math.floor(Date.now() / 1000) - state.lastData.ts;
+    // ESP32 yang hidup tapi tidak push (padam/offline). Umur hanya bermakna
+    // kalau jam perangkat tepercaya; selain itu null (pill "jam belum sinkron").
+    // Clamp minimal 0: selisih jam host vs perangkat bisa membuat ts "masa depan".
+    state.age = clockTrusted(state.lastData)
+      ? Math.max(0, Math.floor(Date.now() / 1000) - state.lastData.ts)
+      : null;
     state.online = true;
     state.loadError = '';
 
@@ -387,11 +409,11 @@ export const trendData = computed(() => {
   const groups = new Map();   // slot -> baris flat dalam satu bucket
   const out = [];
   for (const r of state.logData) {
+    // Record tanpa ts (jam perangkat belum sinkron) TIDAK digambar: tidak ada
+    // posisi jujur di sumbu waktu, dan menaruhnya di ujung kanan membuatnya
+    // terbaca sebagai titik terbaru — padahal bisa jadi record paling tua.
+    if (!clockTrusted(r)) continue;
     const f = flatRow(r);
-    // Tanpa ts (jam perangkat belum sync) tidak masuk bucket: semuanya akan
-    // jatuh ke slot 0 (1970) dan sumbu X kacau. Disimpan sebagai titik
-    // sendiri di akhir — sama seperti tampilan "?" sebelumnya.
-    if (f.ts === null) continue;
     const slot = Math.floor(f.ts / bucket);
     if (!groups.has(slot)) groups.set(slot, []);
     groups.get(slot).push(f);
@@ -401,7 +423,6 @@ export const trendData = computed(() => {
     for (const k of FLAT_FIELDS) g[k] = avgOf(rows, k);
     out.push(g);
   }
-  for (const r of state.logData) if (r.ts === null) out.push(flatRow(r));
   return out;
 });
 
@@ -600,7 +621,10 @@ function cmdConfirmed(cmd, row) {
 function checkPending() {
   const p = state.pending;
   if (!p) return;
-  if (cmdConfirmed(p, state.lastData)) {
+  // Record terakhir menurut urutan tulis, bukan "data terakhir" tepercaya:
+  // perangkat bisa mengeksekusi perintah lalu push record yang jamnya belum
+  // sinkron. Memakai lastData saja menunda konfirmasi sampai NTP jalan.
+  if (cmdConfirmed(p, latestAny ?? state.lastData)) {
     state.cmdStatus = 'Perintah ' + cmdLabel(p) + ' dieksekusi perangkat.';
     state.cmdError = '';
     state.pending = null;
@@ -817,6 +841,7 @@ export function switchZone(i) {
   state.pending = null;
   state.cmdStatus = '';
   state.cmdError = '';
+  latestAny = null;   // jangan konfirmasi perintah zona baru dengan record zona lama
   fetchDataLogs();
 }
 

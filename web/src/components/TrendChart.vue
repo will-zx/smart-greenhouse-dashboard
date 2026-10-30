@@ -131,8 +131,8 @@ watch(trendData, sync);
 
 function sync() {
   if (!chart) return;
-  // Sumbu X: jam saja — label penuh tidak muat. Record tanpa ts (jam perangkat
-  // belum sinkron) tetap dapat label "?".
+  // Sumbu X: jam saja — label penuh tidak muat. Record tanpa ts tidak pernah
+  // sampai ke sini (trendData membuangnya), jadi tidak ada label "?".
   chart.data.labels = trendData.value.map(l => fmtClock(l.ts));
   // Field yang tidak ada (record lama / sensor invalid) -> null, bukan 0:
   // Chart.js menggambar celah, jadi tidak ada titik 0 palsu di grafik.
