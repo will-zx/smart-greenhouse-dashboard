@@ -162,10 +162,9 @@ static time_t   lastRestartEpoch = 0;      // epoch detik restart terakhir
 static unsigned long lastRestartMs = 0;     // fallback kalau jam belum sinkron
 
 // ==== Penanda perintah terakhir yang sudah dieksekusi ====
-// Aturan RTDB memberi device izin BACA saja di /commands (tulis = admin), jadi
-// DELETE dari device ditolak (401) dan entri tidak pernah hilang. Disimpan di
-// NVS supaya perintah yang sama tidak dieksekusi ulang tiap poll 5 s, termasuk
-// setelah reboot.
+// Rules mengizinkan device menghapus perintahnya sendiri. Penanda NVS tetap
+// dipakai supaya perintah tidak diulang kalau DELETE gagal karena jaringan,
+// atau saat firmware lama masih membaca entri yang sudah dieksekusi.
 static String lastCmdKey;
 static bool   lastCmdLoaded = false;
 
@@ -248,8 +247,6 @@ bool pushSensorLog(float temperature, float humidity, float soil, float soil2, f
                    const char* statusSistem, bool manualMode, const PhaseState& phase,
                    const OverrideState& ov, float tmean, const IrrigStatus& irig,
                    String* bodyOut) {
-    if (WiFi.status() != WL_CONNECTED) return false;
-
     // ts = epoch (NTP). Kalau NTP belum sinkron, record TETAP dikirim (tanda
     // kehidupan device) tapi TANPA field ts — epoch 1970 tidak boleh masuk
     // RTDB karena dashboard mengurutkan/menghitung umurnya dari ts.
@@ -305,12 +302,16 @@ bool pushSensorLog(float temperature, float humidity, float soil, float soil2, f
     // String kosong = tidak ada yang ditahan. Dashboard menampilkannya
     // supaya operator tahu kenapa air tidak keluar.
     doc["irigasi_alasan_tahan"] = irig.holdReason ? irig.holdReason : "";
+    doc["irigasi_peringatan"] = irig.warningReason ? irig.warningReason : "";
     doc["time_synced"] = timeOk;
     if (timeOk) doc["ts"] = ts;
     doc["device"] = DEVICE_ID;
     String body;
     serializeJson(doc, body);
     if (bodyOut) *bodyOut = body;
+
+    // Body sudah jadi: netTask tetap bisa mengantrekannya ke SD saat offline.
+    if (WiFi.status() != WL_CONNECTED) return false;
 
     bool ok = httpPost(LOGS_PATH, body);
     if (!ok) Serial.println("[fb] push log gagal (akan diantrekan ke SD)");
@@ -351,21 +352,17 @@ void pollCommands() {
     JsonObject cmds = doc.as<JsonObject>();
     if (err || cmds.size() == 0) return;
 
-    // ponytail: mengurutkan dengan string compare push-ID Firebase (terurut waktu).
-    // Ceiling: hanya konsisten untuk push-ID satu generasi format (yang lama
-    // "-P3..." vs yang baru "mv..."); campuran dua format bisa salah urut.
-    // Perbaikan sebenarnya: izinkan device menghapus /commands miliknya sendiri
-    // di aturan RTDB, supaya entri tidak menumpuk sama sekali.
+    // Dashboard mengirim perintah dengan POST ke parent, jadi key adalah
+    // push-ID Firebase yang dibuat server dan terurut leksikografis. Jangan
+    // memakai key buatan browser: jam yang salah bisa membuat perintah baru
+    // dianggap lebih tua dari high-water mark di NVS.
     // Ceiling: semua perintah ter-fetch tiap 5s; jika volume perintah besar, pakai
     // orderBy="$value/createdAt"&limitToFirst=1 di query (butuh field sort ekstra).
-    // Firebase push-ID terurut; kunci terendah = perintah terlama.
     //
     // PENTING: perintah yang sudah dieksekusi diingat lewat key terakhir di NVS.
-    // Aturan RTDB hanya memberi device izin BACA di /commands (tulis = admin),
-    // jadi DELETE dari device ditolak 401 dan entri TIDAK pernah hilang. Tanpa
-    // penanda ini, entri yang sama dieksekusi ulang tiap poll 5 s (blower/pompa
-    // nyala terus, log spam). Push-ID terurut leksikografis, jadi cukup simpan
-    // key tertinggi yang sudah dieksekusi; key <= itu dianggap sudah selesai.
+    // Tanpa penanda ini, perintah yang sama bisa dieksekusi ulang kalau DELETE
+    // gagal. Push-ID terurut leksikografis, jadi cukup simpan key tertinggi
+    // yang sudah dieksekusi; key <= itu dianggap sudah selesai.
     loadLastCmd();
     const char* oldest = nullptr;
     JsonObject target;    for (JsonPair kv : cmds) {
@@ -477,7 +474,7 @@ void pollCommands() {
     http.end();
 
     // Penanda lokal (NVS): perintah ini sudah dijalankan, jangan diulang walau
-    // DELETE ditolak aturan RTDB (device hanya boleh baca /commands).
+    // DELETE gagal karena jaringan atau aturan yang belum diperbarui.
     lastCmdKey = oldest;
     prefsCmd.begin("smartgh_cmd", false);
     prefsCmd.putString("last_cmd", lastCmdKey);
@@ -500,15 +497,13 @@ void pollCommands() {
             ESP.restart();
         }
     } else if (!delOk) {
-        // Dicetak sekali per boot: menandakan aturan RTDB tidak mengizinkan
-        // device menghapus /commands -> entri menumpuk (bersihkan dari dashboard
-        // admin atau longgarkan aturan). Perintah tetap tidak diulang berkat
-        // penanda last_cmd.
+        // Dicetak sekali per boot: DELETE bisa gagal karena jaringan atau rules
+        // belum mengizinkan device. Perintah tetap tidak diulang berkat last_cmd,
+        // tetapi entri lama bisa menumpuk sampai dihapus dari dashboard admin.
         static bool deleteWarned = false;
         if (!deleteWarned) {
             deleteWarned = true;
-            Serial.printf("[fb] DELETE perintah ditolak (HTTP %d) - aturan RTDB "
-                          "hanya izinkan admin menulis /commands\n", delCode);
+            Serial.printf("[fb] DELETE perintah gagal (HTTP %d) - cek jaringan/rules /commands\n", delCode);
         }
     }
 }

@@ -70,7 +70,8 @@ allowlist rules RTDB.
 ## Wi‑Fi provisioning via AP
 
 - Nyalakan perangkat.
-- Sambungkan perangkat ke jaringan **GH-Setup** (SSID: `GH-Setup`, password: `setup1234`).
+- Sambungkan perangkat ke jaringan **GH-Setup**. Password unik perangkat
+  (`gh-` + 4 byte terakhir MAC) tercetak di serial saat AP aktif.
 - Buka browser ke `http://192.168.4.1`.
 - Isi **SSID** (contoh: `UNNES-ID`), **Password**, **Username** (untuk PEAP‑MSCHAPv2) dan **Identity** (opsional, boleh kosong).
 - Tekan **Simpan** – perangkat akan restart secara otomatis.
@@ -86,7 +87,7 @@ manual atau mengelola greenhouse, klik avatar **Tamu** → **Login**.
 | Peran | Akun | Boleh |
 |---|---|---|
 | Tamu | tanpa akun | baca metrik, grafik, log, dan status aktuator |
-| Admin | `mr.pman@mail.unnes.ac.id` | + sakelar kontrol aktuator & ganti nama greenhouse |
+| Admin | akun admin terdaftar | + sakelar kontrol aktuator & ganti nama greenhouse |
 | Perangkat | satu akun per ESP32 | push sensor, terima perintah |
 
 Status gangguan perangkat tampil sebagai badge di tabel log: `SOILERR` dan
@@ -308,7 +309,7 @@ perangkat.
 
 Dashboard butuh Node.js (Vite) dan tidak bisa dibuka lewat `file://`. Salin
 `web/config.js.example` ke `web/public/config.js`, lalu isi `firebaseConfig`,
-`DB_URL`, dan `ZONES`.
+`DB_URL`, `ZONES`, dan `ADMIN_EMAIL`.
 
 ```bash
 cd web

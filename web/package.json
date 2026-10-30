@@ -2,15 +2,16 @@
   "name": "smart-greenhouse-dashboard",
   "version": "1.0.0",
   "description": "",
-  "main": "app.js",
+  "main": "src/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "wrangler deploy"
   },
   "keywords": [],
   "type": "module",
-  "private": "true",
+  "private": true,
   "dependencies": {
     "chart.js": "^4.5.1",
     "vue": "^3.5.44"

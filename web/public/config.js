@@ -8,8 +8,9 @@ const ZONES = [
     { id: "esp32-gh-01", name: "Greenhouse 1" }
 ];
 
-// Email yang boleh honed control aktuator & set label di dashboard.
-// Aturan sama ditegakkan di RTDB rules — ini hanya menyembunyikan UI.
+// UID admin adalah sumber kebenaran yang sama dengan RTDB rules.
+// ADMIN_EMAIL hanya fallback untuk config lama.
+const ADMIN_UID = "QpW484FycYRnq5S5rzNpON297F83";
 const ADMIN_EMAIL = "mr.pman@mail.unnes.ac.id";
 
 const firebaseConfig = {

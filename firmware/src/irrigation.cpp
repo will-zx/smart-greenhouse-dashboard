@@ -1,6 +1,7 @@
 #include "irrigation.h"
 #include "config.h"
 #include "phase.h"
+#include <Preferences.h>
 #include <time.h>
 
 // ==== State machine fertigasi (empat pompa) ====
@@ -30,6 +31,12 @@ static unsigned long lastRejectMs = 0;
 // tahu kenapa air tidak keluar (bukan cuma "tidak merespons"). Kosong = tidak
 // ditahan.
 static char          holdReason[40] = "";
+// Peringatan yang TIDAK menahan air (mis. probe TDS tidak terbaca). Dipisah
+// dari holdReason supaya dashboard tidak menulis "siklus ditahan" saat DIST
+// tetap berjalan.
+static char          warningReason[40] = "";
+static Preferences   prefsIrig;
+static bool          budgetLoaded = false;
 
 // Siklus terakhir dibatalkan karena TDS di luar rentang. Alasan itu DIPERTAHANKAN
 // (tidak ditimpa "jeda minimum belum lewat" 2 detik kemudian) sampai siklus
@@ -40,6 +47,27 @@ static bool          tdsBlocked = false;
 static void setHoldReason(const char* r) {
     strncpy(holdReason, r, sizeof(holdReason) - 1);
     holdReason[sizeof(holdReason) - 1] = '\0';
+}
+
+static void setWarningReason(const char* r) {
+    strncpy(warningReason, r, sizeof(warningReason) - 1);
+    warningReason[sizeof(warningReason) - 1] = '\0';
+}
+
+// Anggaran harian harus bertahan setelah reboot/brownout; kalau hanya di RAM,
+// setiap restart mengizinkan satu anggaran penuh lagi.
+static void loadBudget() {
+    if (budgetLoaded) return;
+    budgetLoaded = true;
+    prefsIrig.begin("smartgh_irig", false);
+    usedMl = prefsIrig.getFloat("used_ml", 0.0f);
+    usedDayIndex = prefsIrig.getULong("used_day", 0);
+    if (!isfinite(usedMl) || usedMl < 0.0f) usedMl = 0.0f;
+}
+
+static void persistBudget() {
+    prefsIrig.putFloat("used_ml", usedMl);
+    prefsIrig.putULong("used_day", usedDayIndex);
 }
 
 // Permintaan manual: sakelar operator dinyalakan (turun = override dilepas).
@@ -146,25 +174,29 @@ unsigned long irrigationMinIntervalMs() {
     return 86400000UL / (unsigned long)IRRIG_CYCLES_PER_DAY;   // 24 jam / siklus per hari
 }
 
-// Indeks hari untuk reset anggaran harian: epoch (WIB) supaya reset terjadi
-// tengah malam; kalau jam belum sinkron dipakai hari uptime.
+// Indeks hari untuk reset anggaran harian: epoch WIB (UTC+7) supaya reset
+// terjadi tengah malam lokal; kalau jam belum sinkron dipakai hari uptime.
 static unsigned long currentDayIndex() {
     time_t t = time(nullptr);
-    if (t >= 100000) return (unsigned long)(t / 86400);
+    if (t >= 100000) return (unsigned long)((t + 7 * 3600) / 86400);
     return 0x40000000UL + (millis() / 86400000UL);
 }
 
 static void budgetRollOver() {
+    loadBudget();
     unsigned long day = currentDayIndex();
     if (!usedDayInit) {
         usedDayInit = true;
+        // Hari tersimpan sama = lanjutkan pemakaian; beda/kosong = mulai baru.
+        if (usedDayIndex != day) usedMl = 0.0f;
         usedDayIndex = day;
-        usedMl = 0.0f;
+        persistBudget();
         return;
     }
     if (day != usedDayIndex) {
         usedDayIndex = day;
         usedMl = 0.0f;
+        persistBudget();
         Serial.println("[irigasi] hari berganti: anggaran harian direset");
     }
 }
@@ -177,6 +209,7 @@ IrrigStatus irrigationStatus() {
     st.doseMs = (phase == IRRIG_DIST) ? cycleDoseMs : irrigationDoseMs();
     st.doseMl = (phase == IRRIG_DIST) ? cycleDoseMl : irrigationDoseMl();
     st.holdReason = holdReason;
+    st.warningReason = warningReason;
     return st;
 }
 
@@ -302,12 +335,14 @@ void irrigationUpdate(bool trigger, bool manual, float tdsPpm, bool tdsValid) {
             }
             if (manualAllow) manualRequestUsed = true;
             setHoldReason("");
+            setWarningReason("");
             tdsBlocked = false;                  // siklus baru: alasan TDS lama selesai
             cycleDoseMs = doseMs;
             cycleDoseMl = dose;
             lastCycleStartMs = now;
             hasCycle = true;
             usedMl += dose;                      // volume terkumpul hari ini
+            persistBudget();
             Serial.printf("irigasi: dose %.0f mL -> %.0f s | jeda min %.0f jam | "
                           "anggaran harian %.0f mL, terpakai %.0f mL\n",
                           dose, doseMs / 1000.0f,
@@ -361,6 +396,7 @@ void irrigationUpdate(bool trigger, bool manual, float tdsPpm, bool tdsValid) {
             char msg[160];
             if (tdsValid && (tdsPpm < TDS_MIN_PPM || tdsPpm > TDS_MAX_PPM)) {
                 setHoldReason("TDS di luar rentang, distribusi ditahan");
+                setWarningReason("");
                 snprintf(msg, sizeof(msg),
                          "[irigasi] TDS %.0f ppm di luar %.0f..%.0f ppm: distribusi "
                          "DITAHAN, siklus dibatalkan (air di ember tidak dialirkan)",
@@ -370,6 +406,7 @@ void irrigationUpdate(bool trigger, bool manual, float tdsPpm, bool tdsValid) {
                 // Air tidak jadi dialirkan -> anggaran harian dikembalikan.
                 usedMl -= cycleDoseMl;
                 if (usedMl < 0.0f) usedMl = 0.0f;
+                persistBudget();
                 cycleDoseMs = 0;
                 cycleDoseMl = 0.0f;
                 enterPhase(IRRIG_IDLE);
@@ -382,11 +419,12 @@ void irrigationUpdate(bool trigger, bool manual, float tdsPpm, bool tdsValid) {
                 break;
             }
             if (!tdsValid) {
-                setHoldReason("TDS tidak terbaca (air tetap dialirkan)");
+                setWarningReason("TDS tidak terbaca (air tetap dialirkan)");
                 snprintf(msg, sizeof(msg),
                          "[irigasi] TDS tidak terbaca: air tetap didistribusikan");
                 logReject("tds", msg);
             } else {
+                setWarningReason("");
                 Serial.printf("irigasi: TDS %.0f ppm lolos (%.0f..%.0f ppm)\n",
                               tdsPpm, TDS_MIN_PPM, TDS_MAX_PPM);
             }

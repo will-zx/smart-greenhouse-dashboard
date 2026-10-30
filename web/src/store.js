@@ -1,7 +1,7 @@
 import { reactive, computed } from 'vue';
 
 // config.js (public/) dimuat sebagai script global di index.html, jadi di sini
-// ZONES / DB_URL / ADMIN_EMAIL / firebaseConfig dibaca sebagai bare identifier.
+// ZONES / DB_URL / ADMIN_UID / ADMIN_EMAIL / firebaseConfig dibaca sebagai bare identifier.
 //
 // PENTING: `const` di top-level script klasik masuk global LEXICAL environment,
 // bukan sebagai properti globalThis. Modul (file .js) tetap resolve bare
@@ -12,6 +12,9 @@ import { reactive, computed } from 'vue';
 // `ZONES` di dalam template.
 const _zones = ZONES;
 export { _zones as ZONES };
+
+// UID adalah sumber kebenaran rules; email hanya fallback config lama.
+const _adminUid = typeof ADMIN_UID !== 'undefined' ? ADMIN_UID : '';
 
 // -------------------------------------------------- rentang waktu grafik ---
 // Jendela waktu kartu grafik tren. limit = record yang di-fetch dari RTDB
@@ -206,6 +209,7 @@ export function normLog(l, key) {
   const row = {
     _key: key,
     ts: hasTs ? src.ts : null,
+    timeText: fmtLogTime(hasTs ? src.ts : null),
     synced,
     device: typeof src.device === 'string' ? src.device : '',
     temperature: numOrNull(src.temperature),
@@ -259,6 +263,7 @@ export function normLog(l, key) {
       usedMl: numOrNull(src.irigasi_terpakai_ml),
       intervalMin: numOrNull(src.irigasi_jeda_menit),
       holdReason: typeof src.irigasi_alasan_tahan === 'string' ? src.irigasi_alasan_tahan : '',
+      warning: typeof src.irigasi_peringatan === 'string' ? src.irigasi_peringatan : '',
     },
   };
   row.override = {
@@ -287,8 +292,9 @@ export function initAuth() {
 
 function setIdentity(user) {
   const email = user && user.email ? user.email : null;
+  const uid = user && user.uid ? user.uid : null;
   state.user = email;
-  state.isAdmin = !!email && email === ADMIN_EMAIL;
+  state.isAdmin = !!uid && (_adminUid ? uid === _adminUid : email === ADMIN_EMAIL);
 }
 
 // ----------------------------------------------------------------- data ---
@@ -321,14 +327,27 @@ export async function loadLabels() {
 // checkPending(): konfirmasi perintah tidak boleh tertunda hanya karena record
 // terbaru belum punya ts.
 let latestAny = null;
+let fetchSeq = 0;
+
+function updateAge() {
+  const d = state.lastData;
+  state.age = clockTrusted(d)
+    ? Math.max(0, Math.floor(Date.now() / 1000) - d.ts)
+    : null;
+}
 
 export async function fetchDataLogs() {
+  const seq = ++fetchSeq;
+  const zone = zoneId();
+  const limit = state.logLimit;
   try {
-    const path = `zones/${zoneId()}/sensor_logs.json?orderBy="$key"&limitToLast=${state.logLimit}`;
+    const path = `zones/${zone}/sensor_logs.json?orderBy="$key"&limitToLast=${limit}`;
     const res = await fetch(await apiRead(path));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const obj = await res.json();
     if (!obj) throw new Error('kosong');
+    // Zona/rentang bisa berubah saat request masih terbang; jangan timpa state baru.
+    if (seq !== fetchSeq || zone !== zoneId() || limit !== state.logLimit) return;
 
     // Urut berdasarkan ts, bukan kunci push-ID. Kunci RTDB urut saat apa yang
     // ditulis, tapi record lama yang diputar ulang dari backlog MicroSD tetap
@@ -360,15 +379,14 @@ export async function fetchDataLogs() {
     // ESP32 yang hidup tapi tidak push (padam/offline). Umur hanya bermakna
     // kalau jam perangkat tepercaya; selain itu null (pill "jam belum sinkron").
     // Clamp minimal 0: selisih jam host vs perangkat bisa membuat ts "masa depan".
-    state.age = clockTrusted(state.lastData)
-      ? Math.max(0, Math.floor(Date.now() / 1000) - state.lastData.ts)
-      : null;
+    updateAge();
     state.online = true;
     state.loadError = '';
 
     // Perintah yang terkirim: konfirmasi (dari nilai terpasang) atau gagal.
     checkPending();
   } catch (err) {
+    if (seq !== fetchSeq) return;
     console.error("Gagal memuat data:", err.message);
     state.online = false;
     state.loadError = err.message;
@@ -427,16 +445,24 @@ export const trendData = computed(() => {
 });
 
 let timer = null;
+let ageTimer = null;
+function startAgeTimer() {
+  if (ageTimer) clearInterval(ageTimer);
+  ageTimer = setInterval(updateAge, 30000);
+}
 export function startPolling() {
   loadLabels().then(() => {
     fetchDataLogs();
     startTimer();
+    startAgeTimer();
   });
   document.addEventListener('visibilitychange', onVisibility);
 }
 export function stopPolling() {
   clearInterval(timer);
+  clearInterval(ageTimer);
   timer = null;
+  ageTimer = null;
   document.removeEventListener('visibilitychange', onVisibility);
 }
 
@@ -451,10 +477,13 @@ function startTimer() {
 function onVisibility() {
   if (document.visibilityState === 'hidden') {
     clearInterval(timer);
+    clearInterval(ageTimer);
     timer = null;
+    ageTimer = null;
   } else {
     fetchDataLogs();
     startTimer();
+    startAgeTimer();
   }
 }
 
@@ -536,7 +565,7 @@ export const actuators = computed(() => {
 export const matchedLogs = computed(() => {
   const f = state.logFilter;
   if (!f) return state.logData;
-  return state.logData.filter(l => (fmtLogTime(l.ts) + ' ' + (l.statusRaw || '')).toLowerCase().includes(f));
+  return state.logData.filter(l => (l.timeText + ' ' + (l.statusRaw || '')).toLowerCase().includes(f));
 });
 
 // Tabel hanya menampilkan logRows baris terakhir dari jendela fetch
@@ -552,24 +581,11 @@ export const pillClass = s => {
 };
 
 // --------------------------------------------------------- perintah RTDB ---
-// Firmware membaca commands/{DEVICE_ID}/{entri} = {action, value, unit?}
-// (pollCommands() mengambil anak paling lama lalu menghapus entri itu).
-// Entri ditulis sebagai ANAK dengan kunci eksplisit (mirip push-ID) supaya
-// urutannya jelas dan tidak bergantung pada push-ID yang dibuat server.
-// Catatan: bentuk lama (POST {action, value} ke commands/{DEVICE_ID}) juga
-// sebenarnya bisa dibaca firmware, karena POST di REST Firebase setara
-// push() — objek itu berakhir sebagai anak ber-push-ID. Kunci eksplisit
-// dipilih agar antrean perintah jelas urutannya, bukan karena bentuk lama
-// tidak terbaca.
+// Firmware membaca commands/{DEVICE_ID}/{pushId} = {action, value, unit?}
+// dan mengurutkan push-ID secara leksikografis. POST ke parent membiarkan
+// Firebase membuat ID dari jam server, jadi jam browser yang salah tidak
+// membuat perintah baru dianggap lebih tua dari high-water mark firmware.
 const CMD_TIMEOUT_MS = 40000;   // poll 5 s + push 20 s + fetch 10 s + buffer
-
-// Kunci entri perintah: mirip push-ID Firebase (urut waktu, unik).
-let seq = 0;
-function cmdKey() {
-  seq = (seq + 1) % 1000;
-  return '-' + Date.now().toString(36) + String(seq).padStart(3, '0') +
-    Math.random().toString(36).slice(2, 8);
-}
 
 // Label perintah untuk pesan di UI.
 function cmdLabel(cmd) {
@@ -650,6 +666,12 @@ export async function sendCommand(action, value, extra = {}) {
     state.cmdStatus = 'Hanya admin yang boleh mengirim perintah';
     return;
   }
+  checkPending();
+  if (state.pending) {
+    state.cmdStatus = 'Tunggu perintah sebelumnya selesai dulu';
+    state.cmdError = '';
+    return;
+  }
   const body = { action: action, value: value };
   if (extra.unit) body.unit = extra.unit;
   // mode = kemauan operator untuk aktuator: "on" paksa nyala, "off" paksa mati
@@ -660,8 +682,8 @@ export async function sendCommand(action, value, extra = {}) {
   state.cmdError = '';
   try {
     const token = await auth.currentUser.getIdToken();
-    const res = await fetch(`${DB_URL}/commands/${zoneId()}/${cmdKey()}.json?auth=${token}`, {
-      method: 'PUT',
+    const res = await fetch(`${DB_URL}/commands/${zoneId()}.json?auth=${token}`, {
+      method: 'POST',
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });

@@ -6,7 +6,25 @@
 
 WiFiManager wifiManager;
 
+static String htmlEscape(const String& s) {
+    String out;
+    out.reserve(s.length());
+    for (size_t i = 0; i < s.length(); ++i) {
+        char c = s[i];
+        if (c == '&') out += "&amp;";
+        else if (c == '<') out += "&lt;";
+        else if (c == '>') out += "&gt;";
+        else if (c == '"') out += "&quot;";
+        else if (c == '\'') out += "&#39;";
+        else out += c;
+    }
+    return out;
+}
+
 void WiFiManager::begin() {
+    // AP sudah aktif: biarkan handle() melayani form. Jangan reset AP/timer
+    // setiap percobaan reconnect.
+    if (apActive) return;
     // Initialize NVS namespace "wifi"
     prefs.begin("wifi", false);
     WiFi.setTxPower(WIFI_POWER_11dBm);
@@ -112,14 +130,21 @@ void WiFiManager::clearCreds() {
 void WiFiManager::startSetupAP() {
     Serial.println("[wifi] masuk ke mode konfigurasi (AP)");
     WiFi.mode(WIFI_AP_STA);
-    WiFi.softAP("GH-Setup", "setup1234");
-    // Simple HTML form (Enterprise fields removed)
+    uint8_t mac[6] = {0};
+    WiFi.macAddress(mac);
+    char apPass[16];
+    snprintf(apPass, sizeof(apPass), "gh-%02x%02x%02x%02x",
+             mac[2], mac[3], mac[4], mac[5]);
+    WiFi.softAP("GH-Setup", apPass);
+    Serial.printf("[wifi] AP password: %s\n", apPass);
     const char *form = R"EOF(
 <!DOCTYPE html><html><body>
 <h2>Konfigurasi WiFi</h2>
 <form method="POST" action="/save">
 SSID: <input name="ssid"><br>
 Password: <input type="password" name="pwd"><br>
+Username (PEAP-MSCHAPv2, opsional): <input name="usr"><br>
+Identity (opsional): <input name="idn"><br>
 <input type="submit" value="Simpan">
 </form>
 </body></html>
@@ -129,17 +154,20 @@ Password: <input type="password" name="pwd"><br>
         WiFiCred newCred;
         newCred.ssid = server.arg("ssid");
         newCred.password = server.arg("pwd");
-        newCred.username = ""; // Enterprise not supported
-        newCred.identity = "";
+        newCred.username = server.arg("usr");
+        newCred.identity = server.arg("idn");
         if (newCred.ssid.length() == 0) {
             server.send(400, "text/plain", "SSID diperlukan");
             return;
         }
-        // Check for duplicate SSID and update password if exists
+        // Check for duplicate SSID and update all fields if exists
         for (uint8_t i = 0; i < credCount; ++i) {
             if (creds[i].ssid == newCred.ssid) {
-                creds[i].password = newCred.password;
+                creds[i] = newCred;
+                prefs.putString((String("ssid") + i).c_str(), newCred.ssid);
                 prefs.putString((String("pwd") + i).c_str(), newCred.password);
+                prefs.putString((String("usr") + i).c_str(), newCred.username);
+                prefs.putString((String("idn") + i).c_str(), newCred.identity);
                 prefs.end();
                 configSaved = true;
                 server.send(200, "text/plain", "Updated – device will restart");
@@ -157,13 +185,17 @@ Password: <input type="password" name="pwd"><br>
     server.on("/list", HTTP_GET, [this](){
         String page = "<h2>Saved WiFi Networks</h2><ul>";
         for (uint8_t i = 0; i < credCount; ++i) {
-            page += "<li>" + creds[i].ssid + " <a href=\"/del?i=" + String(i) + "\">Delete</a></li>";
+            page += "<li>" + htmlEscape(creds[i].ssid) +
+                    " <form method=\"POST\" action=\"/del\" style=\"display:inline\">"
+                    "<input type=\"hidden\" name=\"i\" value=\"" + String(i) + "\">"
+                    "<button type=\"submit\">Delete</button></form></li>";
         }
-        page += "</ul><a href=\"/clear\">Clear All</a>";
+        page += "</ul><form method=\"POST\" action=\"/clear\">"
+                "<button type=\"submit\">Clear All</button></form>";
         server.send(200, "text/html", page);
     });
     // Delete a network
-    server.on("/del", HTTP_GET, [this](){
+    server.on("/del", HTTP_POST, [this](){
         int idx = server.arg("i").toInt();
         if (idx >= 0 && idx < credCount) {
             for (uint8_t j = idx; j < credCount - 1; ++j) {
@@ -183,12 +215,12 @@ Password: <input type="password" name="pwd"><br>
         server.send(200, "text/plain", "Deleted");
     });
     // Clear all credentials
-    server.on("/clear", HTTP_GET, [this](){
+    server.on("/clear", HTTP_POST, [this](){
         clearCreds();
         server.send(200, "text/plain", "All credentials cleared");
     });
     server.begin();
-    // No blocking loop – AP stays alive, netTask will call handle()
+    // No blocking loop – AP stays alive, netTask calls handle().
     apActive = true;
     apStart = millis();
 

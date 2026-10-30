@@ -466,6 +466,10 @@ static void netTask(void* arg) {
     for (;;) {
         unsigned long now = millis();
 
+        // AP setup butuh handleClient() dan timeout; tanpa ini form provisioning
+        // tidak pernah dilayani dan AP tidak pernah mati.
+        wifiManager.handle();
+
         // Reconnect: tanpa ini, sekali WiFi putus perangkat offline permanen
         // sampai reset manual. Blocking s/d WIFI_TIMEOUT hanya menahan task ini —
         // kontrol lokal & aktuator tetap jalan.
@@ -480,28 +484,27 @@ static void netTask(void* arg) {
 
         Snapshot s = snapshotRead();
 
-        if (WiFi.status() == WL_CONNECTED) {
-            if (now - lastCmd >= DB_POLL_MS) {
-                lastCmd = now;
-                pollCommands();
-            }
-            // Push telemetry SELALU (bukan hanya saat sensor valid): status
-            // "Sensor Error" yang sudah disiapkan harus sampai ke RTDB, kalau
-            // tidak dashboard tidak bisa membedakan "sensor mati" dari
-            // "device mati".
-            if (now - lastPush >= DB_PUSH_MS) {
-                lastPush = now;
-                String body;
-                bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
-                                        s.soil2, s.soil3, s.soilOk, s.soilCount,
-                                        s.vpd, s.etc, s.tds, s.blowerLevel, s.mist,
-                                        s.irigasiRunning, s.status, s.manual, s.phase,
-                                        s.ov, s.tmean, s.irig, &body);
-                if (ok) {
-                    sdFlushBacklog();   // pulih: kirim antrean yang tertunda
-                } else if (body.length() > 0) {
-                    sdQueueBacklog(body.c_str());  // gagal: antre ke MicroSD
-                }
+        if (WiFi.status() == WL_CONNECTED && now - lastCmd >= DB_POLL_MS) {
+            lastCmd = now;
+            pollCommands();
+        }
+
+        // Push telemetry SELALU (bukan hanya saat sensor valid): status
+        // "Sensor Error" yang sudah disiapkan harus sampai ke RTDB, kalau
+        // tidak dashboard tidak bisa membedakan "sensor mati" dari
+        // "device mati". Saat offline, body tetap dibuat lalu masuk backlog SD.
+        if (now - lastPush >= DB_PUSH_MS) {
+            lastPush = now;
+            String body;
+            bool ok = pushSensorLog(s.temperature, s.humidity, s.soilMoisture,
+                                    s.soil2, s.soil3, s.soilOk, s.soilCount,
+                                    s.vpd, s.etc, s.tds, s.blowerLevel, s.mist,
+                                    s.irigasiRunning, s.status, s.manual, s.phase,
+                                    s.ov, s.tmean, s.irig, &body);
+            if (ok) {
+                sdFlushBacklog();   // pulih: kirim antrean yang tertunda
+            } else if (body.length() > 0) {
+                sdQueueBacklog(body.c_str());  // gagal/offline: antre ke MicroSD
             }
         }
 

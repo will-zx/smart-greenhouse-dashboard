@@ -21,6 +21,7 @@ struct IrrigStatus {
     float         usedMl;          // volume yang sudah dialirkan hari ini (mL)
     unsigned long minIntervalMs;   // jeda minimum antar siklus (ms)
     const char*   holdReason;      // alasan permintaan ditahan ("" = tidak ditahan)
+    const char*   warningReason;   // peringatan non-blocking ("" = tidak ada)
 };
 
 // Kumpulkan sampel suhu untuk Tmean (rata-rata sliding 3 jam).

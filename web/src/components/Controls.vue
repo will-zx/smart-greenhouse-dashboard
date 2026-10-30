@@ -97,10 +97,18 @@ const ovOf = k => a.value.override[k] || 'auto';
     <!-- Irigasi alasan tahan: peringatan (kuning), bukan info kecil.
          Kondisi perangkat -> tampil juga untuk tamu. -->
     <div
-      v-if="igLine && ig.holdReason"
+      v-if="ig && ig.holdReason"
       class="mb-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[11.5px] leading-snug text-warn"
     >
       <b>Siklus irigasi ditahan</b> — {{ ig.holdReason }}
+    </div>
+
+    <!-- Peringatan non-blocking: air tetap dialirkan, jangan sebut "ditahan". -->
+    <div
+      v-if="ig && ig.warning"
+      class="mb-3 rounded-lg border border-warn bg-warn-soft px-3 py-2 text-[11.5px] leading-snug text-warn"
+    >
+      <b>Peringatan irigasi</b> — {{ ig.warning }}
     </div>
 
     <!-- Telemetri irigasi: dosis dari ETc, durasi pompa, jeda minimum, dan
