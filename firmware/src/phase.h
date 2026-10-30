@@ -13,7 +13,7 @@ struct PhaseState {
     char     name[PHASE_NAME_LEN];       // nama fase (mis. "Vegetatif")
     float    kc;                         // Kc fase ini (Tabel 2.1 proposal)
     uint32_t durationSec;                // durasi fase (detik); 0 = tanpa batas
-    uint32_t elapsedSec;                 // sudah berjalan sejak durasi di-set (detik)
+    uint32_t elapsedSec;                 // sudah berjalan sejak durasi di-set (detik); bertahan setelah power loss bila NTP sudah sync
     uint32_t remainingSec;               // sisa durasi (detik); 0 bila tanpa batas/habis
 };
 

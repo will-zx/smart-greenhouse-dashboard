@@ -3,17 +3,32 @@
 #include <Preferences.h>
 #include <esp_timer.h>
 #include <string.h>
+#include <time.h>
 
 // Setelan fase disimpan di NVS (namespace NVS_NAMESPACE) supaya bertahan
-// setelah reboot. Penghitung durasi memakai esp_timer (64-bit, tanpa wrap).
+// setelah reboot. Penghitung durasi memakai epoch (bertahan setelah power loss)
+// bila jam sudah sinkron; fallback ke esp_timer (uptime) bila belum.
 static Preferences prefs;
 static bool     s_active = false;
 static float    s_vpdTarget = PHASE_DEFAULT_VPD;
 static char     s_name[PHASE_NAME_LEN] = PHASE_DEFAULT_NAME;
 static uint32_t s_durationSec = PHASE_DEFAULT_DURATION;
+static uint32_t s_startEpoch = 0;      // epoch saat fase di-set/reset (0 = belum sync)
 static int64_t  s_startUs = 0;
 
+static uint32_t nowEpoch() {
+    time_t now = time(nullptr);
+    return (now >= 100000) ? (uint32_t)now : 0;
+}
+
 static uint32_t elapsedSec() {
+    if (s_startEpoch >= 100000) {
+        uint32_t now = nowEpoch();
+        if (now >= 100000) {
+            // clamp ke UINT32_MAX (now selalu >= epoch secara wajar)
+            return (now >= s_startEpoch) ? (now - s_startEpoch) : 0;
+        }
+    }
     if (s_startUs == 0) return 0;
     int64_t d = esp_timer_get_time() - s_startUs;
     if (d < 0) return 0;
@@ -29,6 +44,8 @@ void phaseInit() {
     String n      = prefs.getString("ph_name", PHASE_DEFAULT_NAME);
     strncpy(s_name, n.c_str(), PHASE_NAME_LEN - 1);
     s_name[PHASE_NAME_LEN - 1] = '\0';
+    // ph_epoch tidak ada di device lama -> 0, elapsed fallback ke uptime.
+    s_startEpoch = prefs.getULong("ph_epoch", 0);
     s_startUs = esp_timer_get_time();
 }
 
@@ -62,11 +79,15 @@ void phaseSetDuration(uint32_t seconds) {
     if (seconds > PHASE_MAX_DURATION_SEC) return;   // diamankan di sini juga
     s_durationSec = seconds;
     s_startUs = esp_timer_get_time();   // mulai hitung dari sekarang
+    s_startEpoch = nowEpoch();
     prefs.putULong("ph_dur", seconds);
+    prefs.putULong("ph_epoch", s_startEpoch);
 }
 
 void phaseReset() {
     s_startUs = esp_timer_get_time();
+    s_startEpoch = nowEpoch();
+    prefs.putULong("ph_epoch", s_startEpoch);
 }
 
 bool  phaseActive()    { return s_active; }
