@@ -4,7 +4,7 @@
 #include "secrets.h"
 
 // WiFi timeout (ms) + jeda percobaan reconnect berikutnya
-#define WIFI_TIMEOUT    15000
+#define WIFI_TIMEOUT    8000 // ponytail: shorter Wi‑Fi timeout to avoid long AP‑fallback stalls (ceiling: keep >5000 ms for stable reconnect)
 #define WIFI_RETRY_MS   10000
 
 // Firebase Realtime Database (Spark gratis, tanpa kartu kredit).

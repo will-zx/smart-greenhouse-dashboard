@@ -11,9 +11,10 @@
 #include "actuator.h"
 #include "control.h"
 #include "tds.h"
-#include "firebase_db.h"
 #include "sd_logger.h"
+#include "firebase_db.h"
 #include "lcd_display.h"
+#include "wifi_manager.h"
 
 // ==== Arsitektur 2 task (FreeRTOS) ====
 // controlTask (core 1): sensor -> VPD/ETc -> fuzzy -> aktuator -> irigasi -> LCD -> SD.
@@ -115,26 +116,12 @@ static const char* resetReasonName(esp_reset_reason_t r) {
 // ==== WiFi ====
 static unsigned long lastReconnect = 0;
 
+#include "wifi_manager.h"
+
 void connectWiFi() {
-    WiFi.setTxPower(WIFI_POWER_11dBm);
-    // Modem-sleep bikin handshake TLS sering putus (SSL EOF) di AP tertentu.
-    WiFi.setSleep(false);
-    Serial.print("Connecting to WiFi");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        Serial.print(".");
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println(" Connected!");
-        Serial.print("SSID: ");
-        Serial.println(WiFi.SSID());
-        Serial.print("IP: ");
-        Serial.println(WiFi.localIP());
-    } else {
-        Serial.println(" WiFi timeout, continuing offline");
-    }
+    // Semua logika koneksi (termasuk fallback ke AP setup) dipindahkan ke WiFiManager.
+    wifiManager.begin();
+    // catatan: wifiManager sudah mengatur lastReconnect bila berhasil.
     lastReconnect = millis();
 }
 
