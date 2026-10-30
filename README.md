@@ -67,7 +67,17 @@ Menambah unit greenhouse = tambah baris di `ZONES` (`web/public/config.js`) deng
 `id` yang sama dengan `DEVICE_ID` firmware, plus tambahkan UID perangkat itu ke
 allowlist rules RTDB.
 
-## Akses
+## Wi‑Fi provisioning via AP
+
+- Nyalakan perangkat.
+- Sambungkan perangkat ke jaringan **GH-Setup** (SSID: `GH-Setup`, password: `setup1234`).
+- Buka browser ke `http://192.168.4.1`.
+- Isi **SSID** (contoh: `UNNES-ID`), **Password**, **Username** (untuk PEAP‑MSCHAPv2) dan **Identity** (opsional, boleh kosong).
+- Tekan **Simpan** – perangkat akan restart secara otomatis.
+- Setelah restart, perangkat akan terhubung ke jaringan yang dipilih dan mulai meng‑push data ke RTDB setiap 20 s.
+- Jika password salah, AP akan kembali muncul untuk perbaikan.
+- AP otomatis mati setelah 10 menit atau ketika koneksi berhasil.
+
 
 Dashboard **terbuka untuk semua orang**: siapa pun bisa membuka halaman dan
 melihat data sensor tanpa login, dan tampil sebagai **Tamu**. Untuk kendali

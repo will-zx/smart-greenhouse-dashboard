@@ -18,19 +18,24 @@ struct WiFiCred {
 class WiFiManager {
 public:
     void begin();                // load, try connect, or start AP/setup
-    void saveCred(const WiFiCred &cred);
+    bool saveCred(const WiFiCred &cred);
     void clearCreds();
+    void handle(); // call from netTask to process web server when AP active
+    bool isAPActive() const { return apActive; }
 private:
     Preferences prefs;
     WiFiCred creds[WIFI_MAX_NETWORKS];
     uint8_t credCount = 0;
+    bool configSaved = false;
+    bool apActive = false;
+    unsigned long apStart = 0;
+    const unsigned long AP_TIMEOUT_MS = 10UL * 60UL * 1000UL; // 10 min
     void loadCreds();
     bool tryConnect(const WiFiCred &c);
     bool connectStored();
     void startSetupAP();
     // simple web server for configuration
     WebServer server{80};
-    bool configSaved = false;
 };
 
 extern WiFiManager wifiManager;
